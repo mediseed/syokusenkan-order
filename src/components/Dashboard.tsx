@@ -46,7 +46,7 @@ export default function Dashboard({
 
   // Brand inventory shares
   const brandInventoryStats = products.reduce((acc, p) => {
-    const inv = findInventoryForProduct(p, inventoryList);
+    const inv = findInventoryForProduct(p, inventoryList, products);
     const qty = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
     if (!acc[p.brand]) acc[p.brand] = 0;
     acc[p.brand] += qty;

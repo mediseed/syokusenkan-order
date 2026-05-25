@@ -38,7 +38,7 @@ export default function InventoryTab({
 
   // Compile calculations for each row
   const computedRows = products.map((product) => {
-    const inv = findInventoryForProduct(product, inventoryList);
+    const inv = findInventoryForProduct(product, inventoryList, products);
     const fba = inv.fbaStock;
     const rsl = inv.rslStock;
     const sc = inv.scStock;
@@ -318,8 +318,16 @@ export default function InventoryTab({
                       <td className="py-3.5 px-4 font-mono font-medium text-slate-100">{row.product.sku}</td>
                       <td className="py-3.5 px-4">
                         <div className="space-y-0.5">
-                          <p className="font-semibold text-slate-200">{row.product.name}</p>
-                          <div className="flex items-center gap-2">
+                          <p className="font-semibold text-slate-200 flex items-center gap-1.5 flex-wrap">
+                            <span>{row.product.name}</span>
+                            {row.product.isBundle && (
+                              <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/60 text-[8px] font-bold px-1.5 py-0.2 rounded">セット自動計算</span>
+                            )}
+                            {row.product.integrationCode && (
+                              <span className="bg-indigo-950 text-indigo-300 border border-indigo-900/50 text-[8px] font-bold px-1.5 py-0.2 rounded">🔗 統合: {row.product.integrationCode}</span>
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] text-slate-500 font-mono">{row.product.brand}</span>
                             {row.product.setQuantity > 1 && (
                               <span className="bg-amber-950/60 text-amber-400 border border-amber-900/50 text-[9px] px-1 rounded-sm font-bold">
@@ -327,6 +335,28 @@ export default function InventoryTab({
                               </span>
                             )}
                           </div>
+                          {row.product.isBundle && row.product.bundleItems && row.product.bundleItems.length > 0 && (
+                            <div className="mt-1 bg-slate-950/40 p-1.5 rounded border border-slate-850 text-[10px] space-y-1">
+                              <span className="block text-[9px] font-bold text-emerald-400">構成品目の使用量と現在庫:</span>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5">
+                                {row.product.bundleItems.map((item, idx) => {
+                                  const child = products.find(p => p.sku === item.sku);
+                                  const childInv = findInventoryForProduct(child || { sku: item.sku } as any, inventoryList, products);
+                                  const childTotal = childInv.fbaStock + childInv.rslStock + childInv.scStock + childInv.logiStock;
+                                  return (
+                                    <div key={idx} className="flex justify-between font-mono text-[9px] text-slate-400">
+                                      <span className="truncate max-w-[140px] text-slate-400" title={child ? child.name : item.sku}>
+                                        {child ? child.name : item.sku}
+                                      </span>
+                                      <span className="text-slate-350 ml-1.5">
+                                        必要:{item.quantity} / 在庫:{childTotal}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono text-slate-300">{row.fba.toLocaleString()}</td>

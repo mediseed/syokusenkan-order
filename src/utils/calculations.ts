@@ -7,8 +7,58 @@ import { ProductMaster, InventoryData, SalesData, RecommendedOrder } from '../ty
 
 export const findInventoryForProduct = (
   product: ProductMaster,
-  inventoryList: InventoryData[]
+  inventoryList: InventoryData[],
+  allProducts?: ProductMaster[],
+  visitedSkus: Set<string> = new Set()
 ): InventoryData => {
+  // If the product is a bundle and has constituent items
+  if (product.isBundle && product.bundleItems && product.bundleItems.length > 0 && allProducts) {
+    // Avoid infinite recursion in case of circular definitions
+    if (visitedSkus.has(product.sku.toLowerCase())) {
+      return {
+        sku: product.sku,
+        fbaStock: 0,
+        rslStock: 0,
+        scStock: 0,
+        logiStock: 0,
+        status: '循環参照エラー',
+      };
+    }
+    const newVisited = new Set(visitedSkus);
+    newVisited.add(product.sku.toLowerCase());
+
+    const calculatedStocks = {
+      fbaStock: 999999,
+      rslStock: 999999,
+      scStock: 999999,
+      logiStock: 999999,
+    };
+
+    let hasConstituents = false;
+    product.bundleItems.forEach((item) => {
+      const childProd = allProducts.find((p) => p.sku === item.sku);
+      if (childProd) {
+        hasConstituents = true;
+        const childInv = findInventoryForProduct(childProd, inventoryList, allProducts, newVisited);
+        calculatedStocks.fbaStock = Math.min(calculatedStocks.fbaStock, Math.floor(childInv.fbaStock / item.quantity));
+        calculatedStocks.rslStock = Math.min(calculatedStocks.rslStock, Math.floor(childInv.rslStock / item.quantity));
+        calculatedStocks.scStock = Math.min(calculatedStocks.scStock, Math.floor(childInv.scStock / item.quantity));
+        calculatedStocks.logiStock = Math.min(calculatedStocks.logiStock, Math.floor(childInv.logiStock / item.quantity));
+      }
+    });
+
+    if (hasConstituents) {
+      return {
+        sku: product.sku,
+        fbaStock: calculatedStocks.fbaStock === 999999 ? 0 : calculatedStocks.fbaStock,
+        rslStock: calculatedStocks.rslStock === 999999 ? 0 : calculatedStocks.rslStock,
+        scStock: calculatedStocks.scStock === 999999 ? 0 : calculatedStocks.scStock,
+        logiStock: calculatedStocks.logiStock === 999999 ? 0 : calculatedStocks.logiStock,
+        status: '構成品から自動計算',
+      };
+    }
+  }
+
   const inv = inventoryList.find(
     (i) =>
       i.sku === product.sku ||
@@ -58,12 +108,14 @@ export const computeRecommendations = (
   currentDateStr: string = '2026-05-25'
 ): RecommendedOrder[] => {
   return products.map((product) => {
-    const inv = findInventoryForProduct(product, inventoryList);
+    const inv = findInventoryForProduct(product, inventoryList, products);
     const totalStock = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
     const monthlySales = calculateProductMonthlySales(product, salesList);
 
-    const safetyStock = Math.round(monthlySales * 1.5);
-    const reorderPoint = Math.round(monthlySales * 2);
+    const averageDailySales = monthlySales / 30;
+    const leadTime = typeof product.leadTime === 'number' ? product.leadTime : 14;
+    const safetyStock = typeof product.safetyStock === 'number' ? product.safetyStock : Math.round(averageDailySales * 7);
+    const reorderPoint = Math.round((averageDailySales * leadTime) + safetyStock);
 
     let stockDays = 9999;
     if (monthlySales > 0) {

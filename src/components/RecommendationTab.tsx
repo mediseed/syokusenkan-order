@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Search, ArrowUpDown, Download, AlertTriangle, AlertCircle, CheckCircle } from 'lucide-react';
-import { ProductMaster, InventoryData, SalesData } from '../types';
+import { ProductMaster, InventoryData, SalesData, RecommendedOrder } from '../types';
 import { BRANDS } from '../data/mockData';
 import { computeRecommendations, exportToCSV } from '../utils/calculations';
 
@@ -25,6 +25,7 @@ export default function RecommendationTab({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedPriority, setSelectedPriority] = useState<'all' | '高' | '中' | '低'>('all');
+  const [groupByIntegration, setGroupByIntegration] = useState(true); // Default to true as user is highly interested in this feature
 
   // Sorting
   const [sortField, setSortField] = useState<
@@ -37,7 +38,93 @@ export default function RecommendationTab({
   const itemsPerPage = 8;
 
   // Retrieve calculated recommendations
-  const recommendationsList = computeRecommendations(products, inventoryList, salesList);
+  const baseRecommendationsList = computeRecommendations(products, inventoryList, salesList);
+
+  // Group by integration code if toggled
+  const recommendationsList = React.useMemo(() => {
+    if (!groupByIntegration) return baseRecommendationsList;
+
+    const groups: Record<string, RecommendedOrder[]> = {};
+    const singles: RecommendedOrder[] = [];
+
+    baseRecommendationsList.forEach(r => {
+      const gCode = r.product.integrationCode?.trim();
+      if (gCode) {
+        if (!groups[gCode]) groups[gCode] = [];
+        groups[gCode].push(r);
+      } else {
+        singles.push(r);
+      }
+    });
+
+    const aggregated: RecommendedOrder[] = Object.keys(groups).map(gCode => {
+      const list = groups[gCode];
+      const brands = Array.from(new Set(list.map(x => x.product.brand))).join(' / ');
+      const names = Array.from(new Set(list.map(x => x.product.name))).join(' & ');
+
+      const totalStock = list.reduce((sum, x) => sum + x.totalStock, 0);
+      const fbaStock = list.reduce((sum, x) => sum + x.fbaStock, 0);
+      const rslStock = list.reduce((sum, x) => sum + x.rslStock, 0);
+      const scStock = list.reduce((sum, x) => sum + x.scStock, 0);
+      const logiStock = list.reduce((sum, x) => sum + x.logiStock, 0);
+      const monthlySales = list.reduce((sum, x) => sum + x.monthlySales, 0);
+
+      const safetyStock = list.reduce((sum, x) => sum + x.safetyStock, 0);
+      const reorderPoint = list.reduce((sum, x) => sum + x.reorderPoint, 0);
+      const recommendedQty = list.reduce((sum, x) => sum + x.recommendedQty, 0);
+
+      const stockDays = monthlySales > 0 ? Math.round((totalStock / monthlySales) * 30) : 9999;
+      let priority: '高' | '中' | '低' = '低';
+      if (stockDays < 15) {
+        priority = '高';
+      } else if (stockDays < 30) {
+        priority = '中';
+      }
+
+      let estimatedOutDate = '安定 / 実績なし';
+      if (monthlySales > 0) {
+        const date = new Date('2026-05-25');
+        date.setDate(date.getDate() + stockDays);
+        estimatedOutDate = date.toISOString().split('T')[0];
+      }
+
+      const virtualProduct: ProductMaster = {
+        sku: gCode,
+        brand: brands,
+        name: `${names}`,
+        volume: `統合品目 (${list.length}ブランド)`,
+        weight: list.reduce((sum, x) => sum + x.product.weight, 0),
+        category: 'お茶',
+        setQuantity: 1,
+        fbaSku: gCode,
+        rslSku: '',
+        scCode: '',
+        logiId: '',
+        rawMaterialProducer: '',
+        fillingParty: '',
+        integrationCode: gCode,
+        isActive: true
+      };
+
+      return {
+        product: virtualProduct,
+        fbaStock,
+        rslStock,
+        scStock,
+        logiStock,
+        totalStock,
+        monthlySales,
+        safetyStock,
+        reorderPoint,
+        stockDays,
+        recommendedQty,
+        priority,
+        estimatedOutDate
+      };
+    });
+
+    return [...aggregated, ...singles];
+  }, [baseRecommendationsList, groupByIntegration]);
 
   const handleSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -185,6 +272,20 @@ export default function RecommendationTab({
             <option value="低">低（30日以上）</option>
           </select>
 
+          {/* Brand integration toggle */}
+          <label className="flex items-center gap-1.5 bg-indigo-950/40 hover:bg-indigo-950/70 border border-indigo-900/60 px-3 py-2 rounded-lg cursor-pointer transition select-none">
+            <input
+              type="checkbox"
+              checked={groupByIntegration}
+              onChange={(e) => {
+                setGroupByIntegration(e.target.checked);
+                setCurrentPage(1);
+              }}
+              className="rounded bg-slate-950 border-slate-800 text-indigo-500 focus:ring-indigo-600 focus:ring-offset-slate-900 accent-indigo-500 h-3.5 w-3.5 cursor-pointer"
+            />
+            <span className="text-indigo-200 text-xs font-semibold">🔗 統合コードで一括集計</span>
+          </label>
+
           <button
             onClick={handleExportCSV}
             className="bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold px-3.5 py-2 rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -254,8 +355,16 @@ export default function RecommendationTab({
                     <td className="py-3.5 px-4 font-mono font-medium text-slate-100">{row.product.sku}</td>
                     <td className="py-3.5 px-4">
                       <div className="space-y-0.5">
-                        <p className="font-semibold text-slate-200">{row.product.name}</p>
-                        <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-200 flex items-center gap-1.5 flex-wrap">
+                          <span>{row.product.name}</span>
+                          {row.product.isBundle && (
+                            <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/60 text-[8px] font-bold px-1.5 py-0.2 rounded">セット自動計算</span>
+                          )}
+                          {groupByIntegration && row.product.integrationCode && (
+                            <span className="bg-indigo-950 text-indigo-300 border border-indigo-900 text-[8px] font-bold px-1.5 py-0.2 rounded">🔗 複数ブランド統合</span>
+                          )}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[10px] text-slate-500 font-mono">{row.product.brand}</span>
                           {row.product.setQuantity > 1 && (
                             <span className="bg-amber-950 text-amber-400 border border-amber-900 text-[9px] px-1.5 rounded-sm font-bold animate-pulse">
@@ -263,11 +372,28 @@ export default function RecommendationTab({
                             </span>
                           )}
                         </div>
+                        {row.product.isBundle && row.product.bundleItems && row.product.bundleItems.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {row.product.bundleItems.map((item, idx) => {
+                              const child = products.find(p => p.sku === item.sku);
+                              return (
+                                <span key={idx} className="bg-slate-950/80 border border-slate-800 text-slate-400 text-[8.5px] px-1 py-0.2 rounded font-mono" title={child ? child.name : item.sku}>
+                                  {child ? child.name : item.sku}×{item.quantity}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="py-3.5 px-3 text-right font-mono text-slate-100 font-semibold">{row.monthlySales}</td>
-                    <td className="py-3.5 px-3 text-right text-slate-500 font-mono text-[10px]">
-                      {row.safetyStock} <span className="text-slate-600">/</span> {row.reorderPoint}
+                    <td className="py-3.5 px-3 text-right">
+                      <div className="font-mono text-xs text-slate-200">
+                        {row.safetyStock} <span className="text-slate-600 text-[10px]">/</span> <span className="font-bold text-indigo-300">{row.reorderPoint}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-500 font-sans tracking-tight mt-0.5">
+                        LT: {row.product.leadTime ?? 14}日 • 日販:{Math.round((row.monthlySales / 30) * 10) / 10}個
+                      </div>
                     </td>
                     <td className="py-3.5 px-3 text-right font-mono text-slate-300 font-medium">{row.totalStock}</td>
                     

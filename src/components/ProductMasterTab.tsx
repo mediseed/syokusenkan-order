@@ -4,13 +4,16 @@
  */
 
 import React, { useState } from 'react';
-import { Plus, Search, Edit2, Trash2, SlidersHorizontal, ArrowUpDown, Download, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
-import { ProductMaster } from '../types';
+import { Plus, Search, Edit2, Trash2, SlidersHorizontal, ArrowUpDown, Download, Check, X, ToggleLeft, ToggleRight, GitFork, Layers, Boxes, Link, HelpCircle, Info } from 'lucide-react';
+import { ProductMaster, Manufacturer } from '../types';
 import { BRANDS, CATEGORIES } from '../data/mockData';
 import { exportToCSV } from '../utils/calculations';
+import BrandIntegrationPanel from './BrandIntegrationPanel';
+import IngredientIntegrationPanel from './IngredientIntegrationPanel';
 
 interface ProductMasterTabProps {
   products: ProductMaster[];
+  manufacturers?: Manufacturer[];
   onAddProduct: (product: ProductMaster) => void;
   onUpdateProduct: (product: ProductMaster) => void;
   onDeleteProduct: (sku: string) => void;
@@ -19,6 +22,7 @@ interface ProductMasterTabProps {
 
 export default function ProductMasterTab({
   products,
+  manufacturers = [],
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -56,7 +60,231 @@ export default function ProductMasterTab({
   const [formLogiId, setFormLogiId] = useState('');
   const [formMaker, setFormMaker] = useState('');
   const [formFiller, setFormFiller] = useState('');
+  const [formLeadTime, setFormLeadTime] = useState<number>(14);
+  const [formSafetyStock, setFormSafetyStock] = useState<number>(70);
+  const [formIntegrationCode, setFormIntegrationCode] = useState('');
+  const [formOrderUnitKg, setFormOrderUnitKg] = useState<number>(20);
   const [formIsActive, setFormIsActive] = useState(true);
+  
+  // Set Product (Bundle) states
+  const [formIsBundle, setFormIsBundle] = useState(false);
+  const [formBundleItems, setFormBundleItems] = useState<{ sku: string; quantity: number }[]>([]);
+
+  // --- Sub-tab Navigation state ---
+  const [activeSubTab, setActiveSubTab] = useState<'products' | 'brand_integration' | 'ingredient_integration'>('products');
+
+  // --- Brand Integration (Single & Set Parent-Child linking) State ---
+  const [parentSkuForBrandInt, setParentSkuForBrandInt] = useState('');
+  const [selectedChildSkuForBrandInt, setSelectedChildSkuForBrandInt] = useState('');
+  const [childQtyForBrandInt, setChildQtyForBrandInt] = useState(1);
+  const [tempBundleItems, setTempBundleItems] = useState<{ sku: string; quantity: number }[]>([]);
+
+  // --- Ingredient Integration (Ingredient groupings across brands) State ---
+  const [selectedIntCode, setSelectedIntCode] = useState('');
+  const [isCreatingNewIntGroup, setIsCreatingNewIntGroup] = useState(false);
+  const [newIntCode, setNewIntCode] = useState('');
+  const [newIntName, setNewIntName] = useState('');
+  const [newIntMaker, setNewIntMaker] = useState('');
+  const [newIntFiller, setNewIntFiller] = useState('');
+  const [newIntLotKg, setNewIntLotKg] = useState<number>(20);
+  const [selectedProductsForInt, setSelectedProductsForInt] = useState<Record<string, boolean>>({});
+
+  // --- Brand Integration Handlers ---
+  const handleSelectParentProduct = (parentSku: string) => {
+    setParentSkuForBrandInt(parentSku);
+    const parentProd = products.find(p => p.sku === parentSku);
+    if (parentProd) {
+      setTempBundleItems(parentProd.bundleItems ? [...parentProd.bundleItems] : []);
+    } else {
+      setTempBundleItems([]);
+    }
+    setSelectedChildSkuForBrandInt('');
+    setChildQtyForBrandInt(1);
+  };
+
+  const handleAddChildToParent = () => {
+    if (!parentSkuForBrandInt) {
+      addToast('統合先の親商品（セット商品）を選択してください。', 'warning');
+      return;
+    }
+    if (!selectedChildSkuForBrandInt) {
+      addToast('統合（子）にする単品商品を選択してください。', 'warning');
+      return;
+    }
+    if (selectedChildSkuForBrandInt === parentSkuForBrandInt) {
+      addToast('親商品自身を構成単品として登録することはできません。', 'error');
+      return;
+    }
+    if (tempBundleItems.some(item => item.sku === selectedChildSkuForBrandInt)) {
+      addToast('この単品商品はすでに構成品目（統合中身）に入っています。', 'warning');
+      return;
+    }
+    if (childQtyForBrandInt < 1) {
+      addToast('個数は1以上を設定してください。', 'error');
+      return;
+    }
+
+    setTempBundleItems(prev => [...prev, { sku: selectedChildSkuForBrandInt, quantity: childQtyForBrandInt }]);
+    setSelectedChildSkuForBrandInt('');
+    setChildQtyForBrandInt(1);
+    addToast('構成単品をリストに追加しました。画面下の「ブランド統合を保存」を押して確定させてください。', 'success');
+  };
+
+  const handleRemoveChildFromParent = (skuToRemove: string) => {
+    setTempBundleItems(prev => prev.filter(item => item.sku !== skuToRemove));
+  };
+
+  const handleSaveBrandIntegration = () => {
+    const parentProd = products.find(p => p.sku === parentSkuForBrandInt);
+    if (!parentProd) {
+      addToast('親商品が見つかりません。', 'error');
+      return;
+    }
+
+    if (tempBundleItems.length === 0) {
+      addToast('統合する単品商品が1つも選択されていません。最低1つの構成が必要、または統合を解除する場合は構成を空にして保存できます。', 'warning');
+    }
+
+    // Accumulate total items multiplier count
+    const totalSetQuantity = tempBundleItems.reduce((acc, curr) => acc + curr.quantity, 0);
+
+    const updatedProduct: ProductMaster = {
+      ...parentProd,
+      isBundle: tempBundleItems.length > 0,
+      bundleItems: tempBundleItems.length > 0 ? tempBundleItems : undefined,
+      setQuantity: Math.max(1, totalSetQuantity)
+    };
+
+    onUpdateProduct(updatedProduct);
+    addToast(`親商品「${parentProd.name}」と単品商品のブランド統合（親子セット構成）を保存しました！`, 'success');
+  };
+
+  // --- Ingredient Integration Handlers ---
+  const ingredientGroups = React.useMemo(() => {
+    const groups: Record<string, {
+      code: string;
+      name: string;
+      maker: string;
+      filler: string;
+      lotUnitKg: number;
+      productsCount: number;
+      productNames: string[];
+    }> = {};
+
+    products.forEach(p => {
+      if (p.integrationCode) {
+        const code = p.integrationCode;
+        if (!groups[code]) {
+          // Infer pure name by clean replace
+          const cleanName = p.name.replace(/(1袋|2袋セット|1包|.*袋|お試し|徳用|詰合せ).*$/, '').trim();
+          groups[code] = {
+            code,
+            name: cleanName ? `${cleanName}原料_共通` : `${code}お茶原料`,
+            maker: p.rawMaterialProducer || '',
+            filler: p.fillingParty || '',
+            lotUnitKg: p.orderUnitKg || 20,
+            productsCount: 0,
+            productNames: []
+          };
+        }
+        groups[code].productsCount += 1;
+        groups[code].productNames.push(`${p.brand} - ${p.name}`);
+      }
+    });
+
+    return Object.values(groups);
+  }, [products]);
+
+  const handleSelectIntGroup = (code: string) => {
+    setSelectedIntCode(code);
+    setIsCreatingNewIntGroup(false);
+
+    const checks: Record<string, boolean> = {};
+    products.forEach(p => {
+      checks[p.sku] = p.integrationCode === code && !!code;
+    });
+    setSelectedProductsForInt(checks);
+
+    const group = ingredientGroups.find(g => g.code === code);
+    if (group) {
+      setNewIntCode(group.code);
+      setNewIntName(group.name);
+      setNewIntMaker(group.maker);
+      setNewIntFiller(group.filler);
+      setNewIntLotKg(group.lotUnitKg);
+    } else {
+      setNewIntCode('');
+      setNewIntName('');
+      setNewIntMaker('');
+      setNewIntFiller('');
+      setNewIntLotKg(20);
+    }
+  };
+
+  const handleStartNewIntGroup = () => {
+    setSelectedIntCode('__new__');
+    setIsCreatingNewIntGroup(true);
+    setNewIntCode('');
+    setNewIntName('');
+    setNewIntMaker('');
+    setNewIntFiller('');
+    setNewIntLotKg(20);
+    // Default none checked
+    setSelectedProductsForInt({});
+  };
+
+  const handleSaveIngredientIntegration = () => {
+    const codeToUse = isCreatingNewIntGroup ? newIntCode.trim() : selectedIntCode;
+    
+    if (!codeToUse) {
+      addToast('原料統合コード（アルファベット等のキー：例: azuki）は必須です。', 'error');
+      return;
+    }
+
+    if (isCreatingNewIntGroup && products.some(p => p.integrationCode === codeToUse)) {
+      addToast(`指定された統合コード「${codeToUse}」はすでに他の原料で使用されています。`, 'error');
+      return;
+    }
+
+    const finalMaker = newIntMaker.trim();
+    const finalFiller = newIntFiller.trim();
+    const finalLotKg = newIntLotKg;
+
+    let updateCount = 0;
+    let clearCount = 0;
+
+    products.forEach(p => {
+      const isChecked = selectedProductsForInt[p.sku] || false;
+      const currentlyHasCode = p.integrationCode === codeToUse;
+
+      if (isChecked) {
+        // Associate with this integration code
+        const updated: ProductMaster = {
+          ...p,
+          integrationCode: codeToUse,
+          rawMaterialProducer: finalMaker || p.rawMaterialProducer,
+          fillingParty: finalFiller || p.fillingParty,
+          orderUnitKg: finalLotKg
+        };
+        onUpdateProduct(updated);
+        updateCount++;
+      } else if (currentlyHasCode) {
+        // Dissociate from this integration code
+        const updated: ProductMaster = {
+          ...p,
+          integrationCode: undefined
+        };
+        onUpdateProduct(updated);
+        clearCount++;
+      }
+    });
+
+    addToast(`原料統合コード「${codeToUse}」の紐付け情報とメーカーロット設定を一括保存しました！（統合:${updateCount}品 / 除外:${clearCount}品）`, 'success');
+    
+    // Automatically select the saved group
+    setSelectedIntCode(codeToUse);
+    setIsCreatingNewIntGroup(false);
+  };
 
   // Sorting triggers
   const handleSort = (field: keyof ProductMaster) => {
@@ -66,7 +294,7 @@ export default function ProductMasterTab({
       setSortField(field);
       setSortDirection('asc');
     }
-    setCurrentPage(1);
+    currentPage === 1 ? null : setCurrentPage(1);
   };
 
   // Open Add Modal
@@ -85,6 +313,12 @@ export default function ProductMasterTab({
     setFormLogiId('');
     setFormMaker('');
     setFormFiller('');
+    setFormLeadTime(14);
+    setFormSafetyStock(70);
+    setFormIntegrationCode('');
+    setFormOrderUnitKg(20);
+    setFormIsBundle(false);
+    setFormBundleItems([]);
     setFormIsActive(true);
     setIsModalOpen(true);
   };
@@ -105,6 +339,12 @@ export default function ProductMasterTab({
     setFormLogiId(p.logiId || '');
     setFormMaker(p.rawMaterialProducer);
     setFormFiller(p.fillingParty);
+    setFormLeadTime(p.leadTime ?? 14);
+    setFormSafetyStock(p.safetyStock ?? 70);
+    setFormIntegrationCode(p.integrationCode || '');
+    setFormOrderUnitKg(p.orderUnitKg ?? 20);
+    setFormIsBundle(p.isBundle || false);
+    setFormBundleItems(p.bundleItems ? [...p.bundleItems] : []);
     setFormIsActive(p.isActive);
     setIsModalOpen(true);
   };
@@ -129,6 +369,18 @@ export default function ProductMasterTab({
       addToast('セット数は1以上の数値を入力してください。', 'error');
       return;
     }
+    if (formLeadTime < 0) {
+      addToast('リードタイムは0日以上の数値を入力してください。', 'error');
+      return;
+    }
+    if (formSafetyStock < 0) {
+      addToast('安全在庫は0以上の数値を入力してください。', 'error');
+      return;
+    }
+    if (formIsBundle && formBundleItems.length === 0) {
+      addToast('セット商品の場合は、構成品目を1つ以上追加してください。', 'warning');
+      return;
+    }
 
     const payload: ProductMaster = {
       sku: formSku.trim(),
@@ -144,6 +396,12 @@ export default function ProductMasterTab({
       logiId: formLogiId.trim(),
       rawMaterialProducer: formMaker.trim(),
       fillingParty: formFiller.trim(),
+      leadTime: formLeadTime,
+      safetyStock: formSafetyStock,
+      isBundle: formIsBundle,
+      bundleItems: formIsBundle ? formBundleItems : undefined,
+      integrationCode: formIntegrationCode.trim() || undefined,
+      orderUnitKg: formOrderUnitKg,
       isActive: formIsActive
     };
 
@@ -250,7 +508,49 @@ export default function ProductMasterTab({
 
   return (
     <div className="space-y-4">
-      {/* Action / Search Header Bar */}
+      {/* Sub-tab Navigation Header */}
+      <div className="flex border-b border-slate-800 bg-slate-900/40 p-1 rounded-xl gap-1 mb-4 select-none">
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('products')}
+          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeSubTab === 'products'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Boxes className="w-4 h-4" />
+          <span>① 商品マスタ登録</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('brand_integration')}
+          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeSubTab === 'brand_integration'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <GitFork className="w-4 h-4" />
+          <span>② マスタ統合（ブランドごと）</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('ingredient_integration')}
+          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeSubTab === 'ingredient_integration'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>③ マスタ統合（原料ごと）</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'products' &&
+        <div className="space-y-4">
+          {/* Action / Search Header Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-md">
         
         {/* Search Input inline */}
@@ -393,7 +693,32 @@ export default function ProductMasterTab({
                     <td className="py-3 px-4 font-mono font-medium text-slate-100">{p.sku}</td>
                     <td className="py-3 px-4 font-medium text-slate-300">{p.brand}</td>
                     <td className="py-3 px-4 max-w-xxs overflow-hidden text-ellipsis whitespace-nowrap" title={p.name}>
-                      <span className="font-semibold text-slate-200">{p.name}</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-slate-200">{p.name}</span>
+                        {p.isBundle && (
+                          <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/60 px-1.5 py-0.5 rounded text-[8px] font-bold">セット商品</span>
+                        )}
+                        {p.integrationCode && (
+                          <span className="bg-blue-950/80 text-blue-300 border border-blue-900/50 px-1.5 py-0.5 rounded text-[9px] font-bold font-mono">🔗 統合: {p.integrationCode}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px] opacity-90">
+                        <span className="bg-indigo-950 text-indigo-300 border border-indigo-900/50 px-1.5 py-0.2 rounded font-mono text-[9px]">LT: {p.leadTime ?? 14}日</span>
+                        <span className="bg-slate-950 text-emerald-400 border border-slate-800 px-1.5 py-0.2 rounded font-mono text-[9px]">安全: {p.safetyStock ?? 70}個</span>
+                      </div>
+                      {p.isBundle && p.bundleItems && p.bundleItems.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1 items-center">
+                          <span className="text-[9px] text-slate-500 font-medium">構成:</span>
+                          {p.bundleItems.map((item, idx) => {
+                            const child = products.find(prod => prod.sku === item.sku);
+                            return (
+                              <span key={idx} className="text-[9px] bg-slate-950/60 border border-slate-800 text-slate-350 px-1.5 py-0.2 rounded font-mono" title={child ? child.name : item.sku}>
+                                {child ? child.name : item.sku}×{item.quantity}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-slate-400">
                       {p.volume} <span className="text-[10px] text-slate-600">({p.weight}g)</span>
@@ -509,6 +834,25 @@ export default function ProductMasterTab({
           </div>
         </div>
       </div>
+      </div>
+    }
+
+      {activeSubTab === 'brand_integration' &&
+        <BrandIntegrationPanel
+          products={products}
+          onUpdateProduct={onUpdateProduct}
+          addToast={addToast}
+        />
+      }
+
+      {activeSubTab === 'ingredient_integration' &&
+        <IngredientIntegrationPanel
+          products={products}
+          manufacturers={manufacturers}
+          onUpdateProduct={onUpdateProduct}
+          addToast={addToast}
+        />
+      }
 
       {/* CRUD Add/Edit Product Modal Dialog */}
       {isModalOpen && (
@@ -607,6 +951,41 @@ export default function ProductMasterTab({
                   </select>
                 </div>
 
+                {/* Integration Code */}
+                <div className="space-y-1 col-span-2 sm:col-span-1">
+                  <label className="block text-slate-400 font-medium flex items-center gap-1">
+                    <span className="text-indigo-400">🔗 統合コード (任意)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formIntegrationCode}
+                    onChange={(e) => setFormIntegrationCode(e.target.value)}
+                    placeholder="例: azuki, gobou"
+                    className="w-full bg-slate-950 border border-indigo-950 text-indigo-300 font-mono font-medium rounded p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none placeholder:text-slate-600 transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    ブランドをまたいでお茶等を統合集計する一致キー（例：「azuki」で統合）
+                  </p>
+                </div>
+
+                {/* Order Unit Kg */}
+                <div className="space-y-1 col-span-2 sm:col-span-1">
+                  <label className="block text-slate-400 font-medium flex items-center gap-1">
+                    <span className="text-emerald-400">⚖️ 発注ロット単位 (kg)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formOrderUnitKg}
+                    onChange={(e) => setFormOrderUnitKg(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    placeholder="例: 20"
+                    className="w-full bg-slate-950 border border-slate-800 text-emerald-300 font-mono font-medium rounded p-2 focus:ring-1 focus:ring-emerald-500 focus:outline-none transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    原料や資材の最低発注ロット切り上げ単位（例: 20kg単位や10kg単位）
+                  </p>
+                </div>
+
                 {/* Set Quantity */}
                 <div className="space-y-1 col-span-2 sm:col-span-1">
                   <label className="block text-slate-400 font-medium font-sans text-amber-400 flex items-center gap-1">
@@ -674,25 +1053,210 @@ export default function ProductMasterTab({
                 {/* Raw Material Producer */}
                 <div className="space-y-1 col-span-2 sm:col-span-1">
                   <label className="block text-slate-400 font-medium">原料メーカー</label>
-                  <input
-                    type="text"
+                  <select
                     value={formMaker}
                     onChange={(e) => setFormMaker(e.target.value)}
-                    placeholder="例: 株式会社天草"
                     className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all"
-                  />
+                  >
+                    <option value="">-- 未選択 (マスタ外手動設定) --</option>
+                    {(manufacturers || []).filter(m => m.type === '原料').map(m => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
+                    {formMaker && !manufacturers.some(m => m.name === formMaker && m.type === '原料') && (
+                      <option value={formMaker}>{formMaker} *(未登録メーカー)</option>
+                    )}
+                  </select>
                 </div>
 
                 {/* Filling party */}
                 <div className="space-y-1 col-span-2 sm:col-span-1">
                   <label className="block text-slate-400 font-medium">充填先工場</label>
-                  <input
-                    type="text"
+                  <select
                     value={formFiller}
                     onChange={(e) => setFormFiller(e.target.value)}
-                    placeholder="例: ○○充填ライン"
                     className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all"
-                  />
+                  >
+                    <option value="">-- 未選択 (マスタ外手動設定) --</option>
+                    {(manufacturers || []).filter(m => m.type === '製造').map(m => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
+                    {formFiller && !manufacturers.some(m => m.name === formFiller && m.type === '製造') && (
+                      <option value={formFiller}>{formFiller} *(未登録工場)</option>
+                    )}
+                  </select>
+                </div>
+
+                {/* Settle Product / Bundle Selection & Composition Recipe Settings */}
+                <div className="col-span-2 bg-slate-950/40 border border-slate-800 rounded-lg p-3.5 space-y-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1 border-b border-slate-800 pb-2">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      📦 セット・詰合せ商品の設定
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="formIsBundleCheckbox"
+                        checked={formIsBundle}
+                        onChange={(e) => {
+                          setFormIsBundle(e.target.checked);
+                          if (e.target.checked && formBundleItems.length === 0) {
+                            // Find any existing single product to add as default constituent
+                            const availableSingles = products.filter(p => !p.isBundle && p.sku !== formSku);
+                            if (availableSingles.length > 0) {
+                              setFormBundleItems([{ sku: availableSingles[0].sku, quantity: 1 }]);
+                            }
+                          }
+                        }}
+                        className="w-4 h-4 rounded text-emerald-600 bg-slate-950 border-slate-800 focus:ring-emerald-500 cursor-pointer"
+                      />
+                      <label htmlFor="formIsBundleCheckbox" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
+                        この商品はセット商品（他の単品の詰合せ）である
+                      </label>
+                    </div>
+                  </div>
+
+                  {formIsBundle && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-slate-400 font-medium">構成単品と1セットあたりの必要個数:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const availableSingles = products.filter(p => p.sku !== formSku);
+                            if (availableSingles.length > 0) {
+                              setFormBundleItems(prev => [...prev, { sku: availableSingles[0].sku, quantity: 1 }]);
+                            } else {
+                              addToast('構成品に指定できる商品が他にありません。先に別の商品を登録してください。', 'warning');
+                            }
+                          }}
+                          className="bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-900/60 text-emerald-400 text-[10px] font-bold px-2 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          ＋ 構成品を追加
+                        </button>
+                      </div>
+
+                      {formBundleItems.length === 0 ? (
+                        <div className="text-center py-4 bg-slate-900/40 rounded border border-dashed border-slate-800 text-[11px] text-slate-500">
+                          追加ボタンを押して、このセットに組み入れる単品商品を選択してください
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {formBundleItems.map((item, idx) => {
+                            const selections = products.filter(p => p.sku !== formSku);
+                            return (
+                              <div key={idx} className="flex items-center gap-2 bg-slate-900/80 p-2 rounded border border-slate-850">
+                                <span className="text-[10px] font-mono text-slate-500 font-bold w-6 text-center">#{idx + 1}</span>
+                                <div className="flex-1">
+                                  <select
+                                    value={item.sku}
+                                    onChange={(e) => {
+                                      const newItems = [...formBundleItems];
+                                      newItems[idx].sku = e.target.value;
+                                      setFormBundleItems(newItems);
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 text-xs text-slate-200 rounded p-1.5 focus:ring-1 focus:ring-emerald-500"
+                                  >
+                                    {selections.map(p => (
+                                      <option key={p.sku} value={p.sku}>
+                                        {p.brand} - {p.name} ({p.sku})
+                                      </option>
+                                    ))}
+                                    {selections.length === 0 && (
+                                      <option value="">(選択可能な商品がありません)</option>
+                                    )}
+                                  </select>
+                                </div>
+                                <div className="w-24 relative flex items-center">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={item.quantity}
+                                    onChange={(e) => {
+                                      const newItems = [...formBundleItems];
+                                      newItems[idx].quantity = Math.max(1, parseInt(e.target.value, 10) || 1);
+                                      setFormBundleItems(newItems);
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 text-center text-xs text-slate-100 rounded p-1.5 focus:ring-1 focus:ring-emerald-500 font-mono"
+                                  />
+                                  <span className="absolute right-2 text-[10px] text-slate-500 font-medium">個</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormBundleItems(prev => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-slate-850 bg-slate-900 rounded border border-slate-800 cursor-pointer text-xs"
+                                  title="削除"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="bg-slate-900/60 p-2.5 rounded border border-slate-850 text-[10px] text-slate-400 leading-normal font-sans">
+                        <span className="text-emerald-400 font-semibold mb-0.5 block">💡 在庫自動計算の仕様:</span>
+                        セット商品の在庫数は、構成品の各倉庫別在庫数から自動計算されます。
+                        （例：じゃがいもが10個、ほうれん草が5個あり、セットにじゃがいも4個・ほうれん草1個必要な場合、組み立て可能限度はmin(10/4, 5/1) = 2セットになります）
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Reorder Point Parameters */}
+                <div className="col-span-2 bg-indigo-950/20 border border-indigo-900/40 rounded-lg p-3.5 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-1">
+                    <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+                      📊 発注点計算パラメータ (商品単位)
+                    </span>
+                    <span className="text-[10px] bg-slate-950/60 text-slate-400 font-semibold px-2 py-0.5 rounded border border-slate-800 font-mono">
+                      計算式: (平均日販 × リードタイム) + 安全在庫
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1 text-xs">
+                      <label className="block text-slate-400 font-medium">
+                        リードタイム (LT日数) *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          required
+                          min="0"
+                          value={formLeadTime}
+                          onChange={(e) => setFormLeadTime(parseInt(e.target.value, 10) || 0)}
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded p-2 pr-8 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all font-mono"
+                        />
+                        <span className="absolute right-3 top-2.5 text-[10px] text-slate-500 font-medium font-sans">日</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 leading-normal">
+                        発注してから納品されるまでの日数（例: 14日）
+                      </p>
+                    </div>
+
+                    <div className="space-y-1 text-xs">
+                      <label className="block text-slate-400 font-medium">
+                        安全在庫数 *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          required
+                          min="0"
+                          value={formSafetyStock}
+                          onChange={(e) => setFormSafetyStock(parseInt(e.target.value, 10) || 0)}
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded p-2 pr-8 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all font-mono"
+                        />
+                        <span className="absolute right-3 top-2.5 text-[10px] text-slate-500 font-medium font-sans flex items-center">個 / セット</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 leading-normal">
+                        欠品防止のため最低限確保する個数（例: 70個）
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Status Toggle checkbox active */}

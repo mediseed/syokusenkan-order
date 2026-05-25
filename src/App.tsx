@@ -4,23 +4,134 @@
  */
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory } from 'lucide-react';
 
-import { ProductMaster, InventoryData, SalesData } from './types';
-import { initialProducts, initialInventory, initialSales } from './data/mockData';
+import { ProductMaster, InventoryData, SalesData, PurchaseOrder, Manufacturer } from './types';
+import { initialProducts, initialInventory, initialSales, initialManufacturers } from './data/mockData';
 
 // Import our interactive modular tabs
 import Dashboard from './components/Dashboard';
 import ProductMasterTab from './components/ProductMasterTab';
 import InventoryTab from './components/InventoryTab';
 import RecommendationTab from './components/RecommendationTab';
+import OrderManagementTab from './components/OrderManagementTab';
 import CSVImportModal from './components/CSVImportModal';
+import ManufacturerTab from './components/ManufacturerTab';
 
 export default function App() {
   // Global Shared States
   const [products, setProducts] = useState<ProductMaster[]>(initialProducts);
   const [inventoryList, setInventoryList] = useState<InventoryData[]>(initialInventory);
   const [salesList, setSalesList] = useState<SalesData[]>(initialSales);
+
+  // Manufacturers States with localStorage Support
+  const [manufacturers, setManufacturers] = useState<Manufacturer[]>(() => {
+    const cached = localStorage.getItem('healthon_po_manufacturers');
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        // Fallback
+      }
+    }
+    localStorage.setItem('healthon_po_manufacturers', JSON.stringify(initialManufacturers));
+    return initialManufacturers;
+  });
+
+  const saveManufacturersToCache = (newManufacturers: Manufacturer[]) => {
+    setManufacturers(newManufacturers);
+    localStorage.setItem('healthon_po_manufacturers', JSON.stringify(newManufacturers));
+  };
+
+  const handleAddManufacturer = (newM: Manufacturer) => {
+    saveManufacturersToCache([newM, ...manufacturers]);
+  };
+
+  const handleUpdateManufacturer = (updatedM: Manufacturer) => {
+    saveManufacturersToCache(manufacturers.map(m => m.id === updatedM.id ? updatedM : m));
+  };
+
+  const handleDeleteManufacturer = (idToDelete: string) => {
+    saveManufacturersToCache(manufacturers.filter(m => m.id !== idToDelete));
+  };
+
+  // Load and store orders state with localStorage support and pre-populated default mock records
+  const [orders, setOrders] = useState<PurchaseOrder[]>(() => {
+    const cached = localStorage.getItem('healthon_po_orders');
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        // Fallback
+      }
+    }
+    const defaults: PurchaseOrder[] = [
+      {
+        id: "PO-TEA-001",
+        groupName: "【合計】お茶/4月発注",
+        orderDate: "2026-04-10",
+        scheduledDeliveryDate: "2026-04-24",
+        assignedStaff: "佐藤 拓也",
+        status: "入庫完了",
+        items: [
+          { sku: "azuki", productName: "あずき茶", brand: "温活農園", requestedQty: 150, weight: 160 },
+          { sku: "gobou", productName: "国産ごぼう茶", brand: "大福園", requestedQty: 100, weight: 120 },
+          { sku: "chamomile", productName: "カモミールハーブティー", brand: "MEZZO", requestedQty: 80, weight: 45 }
+        ],
+        notes: "お茶類4月統合発注分。天草、大福、MEZZO各社一括出荷にて手配。"
+      },
+      {
+        id: "PO-MAMA-002",
+        groupName: "【ママセレクト】5月発注用",
+        orderDate: "2026-05-15",
+        scheduledDeliveryDate: "2026-05-29",
+        assignedStaff: "鈴木 健一郎",
+        status: "検収中/入庫中",
+        items: [
+          { sku: "tanpopo-set3", productName: "たんぽぽ茶3個セット", brand: "ママセレクト", requestedQty: 60, weight: 180 },
+          { sku: "potato-pw", productName: "じゃがいもパウダー", brand: "ママセレクト", requestedQty: 120, weight: 100 }
+        ],
+        notes: "一部パウダー原材料入荷状況により、ほうれん草/コーンは別途発注予定。"
+      }
+    ];
+    localStorage.setItem('healthon_po_orders', JSON.stringify(defaults));
+    return defaults;
+  });
+
+  const saveOrdersToCache = (newOrders: PurchaseOrder[]) => {
+    setOrders(newOrders);
+    localStorage.setItem('healthon_po_orders', JSON.stringify(newOrders));
+  };
+
+  const handleAddOrder = (newOrder: PurchaseOrder) => {
+    saveOrdersToCache([newOrder, ...orders]);
+  };
+
+  const handleUpdateOrder = (updatedOrder: PurchaseOrder) => {
+    saveOrdersToCache(orders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    
+    // Auto-update inventory stocks of products if the order moves to '入庫完了'
+    if (updatedOrder.status === '入庫完了') {
+      setInventoryList(prev => {
+        return prev.map(inv => {
+          const matchingItem = updatedOrder.items.find(it => it.sku === inv.sku);
+          if (matchingItem) {
+            return {
+              ...inv,
+              logiStock: inv.logiStock + matchingItem.requestedQty,
+              status: '在庫あり'
+            };
+          }
+          return inv;
+        });
+      });
+      addToast(`発注商品がすべて入庫完了したため、クラウドロジ(国内流通倉庫)在庫に加算されました！`, 'success');
+    }
+  };
+
+  const handleDeleteOrder = (idToDelete: string) => {
+    saveOrdersToCache(orders.filter(o => o.id !== idToDelete));
+  };
 
   // Keep track of when warehouse files were last uploaded
   const [uploadTimestamps, setUploadTimestamps] = useState<Record<string, string>>({
@@ -192,12 +303,14 @@ export default function App() {
 
       {/* Primary Tab Navigation Tabs bar */}
       <div className="bg-slate-900 border-b border-slate-800/80 sticky top-[73px] sm:top-[69px] z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap">
           {[
             { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
             { id: 'products', label: '商品マスタ管理', icon: Boxes },
             { id: 'inventory', label: '在庫状況一覧', icon: Boxes },
             { id: 'recommendations', label: '自動発注推奨', icon: Sparkles },
+            { id: 'orders', label: '発注処理', icon: ClipboardList },
+            { id: 'manufacturers', label: 'メーカーマスタ管理', icon: Factory },
           ].map((tab) => {
             const Icon = tab.icon;
             const isSelected = activeTab === tab.id;
@@ -206,11 +319,11 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-3.5 px-5 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 flex-1 sm:flex-none justify-center ${
-                  isSelected
-                    ? 'border-indigo-500 text-indigo-400 bg-indigo-950/25 font-bold'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-850/30'
-                }`}
+                className={`py-3.5 px-3 sm:px-5 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 justify-center flex-1 sm:flex-none ${
+                    isSelected
+                      ? 'border-indigo-500 text-indigo-400 bg-indigo-950/25 font-bold'
+                      : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-850/30'
+                  }`}
               >
                 <Icon className={`w-4 h-4 ${isSelected ? 'text-indigo-400' : 'text-slate-500'}`} />
                 <span>{tab.label}</span>
@@ -235,6 +348,7 @@ export default function App() {
         {activeTab === 'products' && (
           <ProductMasterTab
             products={products}
+            manufacturers={manufacturers}
             onAddProduct={handleAddProduct}
             onUpdateProduct={handleUpdateProduct}
             onDeleteProduct={handleDeleteProduct}
@@ -257,6 +371,30 @@ export default function App() {
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            addToast={addToast}
+          />
+        )}
+
+        {activeTab === 'orders' && (
+          <OrderManagementTab
+            products={products}
+            manufacturers={manufacturers}
+            inventoryList={inventoryList}
+            salesList={salesList}
+            orders={orders}
+            onAddOrder={handleAddOrder}
+            onUpdateOrder={handleUpdateOrder}
+            onDeleteOrder={handleDeleteOrder}
+            addToast={addToast}
+          />
+        )}
+
+        {activeTab === 'manufacturers' && (
+          <ManufacturerTab
+            manufacturers={manufacturers}
+            onAddManufacturer={handleAddManufacturer}
+            onUpdateManufacturer={handleUpdateManufacturer}
+            onDeleteManufacturer={handleDeleteManufacturer}
             addToast={addToast}
           />
         )}
