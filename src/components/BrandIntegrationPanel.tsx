@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { GitFork } from 'lucide-react';
+import { GitFork, Search } from 'lucide-react';
 import { ProductMaster } from '../types';
 
 interface BrandIntegrationPanelProps {
@@ -19,6 +19,7 @@ export default function BrandIntegrationPanel({
   addToast
 }: BrandIntegrationPanelProps) {
   const [parentSku, setParentSku] = useState('');
+  const [parentSearchTerm, setParentSearchTerm] = useState('');
   const [selectedChildSku, setSelectedChildSku] = useState('');
   const [childQty, setChildQty] = useState(1);
   const [tempBundleItems, setTempBundleItems] = useState<{ sku: string; quantity: number }[]>([]);
@@ -90,6 +91,23 @@ export default function BrandIntegrationPanel({
 
   const parentProd = products.find(p => p.sku === parentSku);
 
+  const parentCandidates = React.useMemo(() => {
+    return products.filter(p => {
+      // 1. Only allow if "isBundle" (セット商品区分) is checked
+      const isParentBundle = !!p.isBundle;
+      if (!isParentBundle && p.sku !== parentSku) {
+        return false;
+      }
+
+      // 2. Filter by search query
+      if (!parentSearchTerm) return true;
+      const term = parentSearchTerm.toLowerCase();
+      return p.name.toLowerCase().includes(term) || 
+             p.sku.toLowerCase().includes(term) || 
+             p.brand.toLowerCase().includes(term);
+    });
+  }, [products, parentSearchTerm, parentSku]);
+
   return (
     <div className="space-y-4 font-sans text-xs">
       {/* Explanatory Header Card */}
@@ -111,6 +129,23 @@ export default function BrandIntegrationPanel({
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Left: Parent Product Selector */}
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4 shadow-md">
+          {/* Parent Search Input */}
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-slate-400">
+              親商品の簡易検索 (セット商品のみ対象):
+            </label>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="SKU・商品名で絞り込み..."
+                value={parentSearchTerm}
+                onChange={(e) => setParentSearchTerm(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg pl-9 pr-3 py-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all placeholder:text-slate-650"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <label className="block text-[11px] font-bold text-slate-400">
               統合先の親商品（セット・複数パック）を選択:
@@ -121,12 +156,17 @@ export default function BrandIntegrationPanel({
               className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-2.5 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all cursor-pointer"
             >
               <option value="">-- 親（セット）商品を選択してください --</option>
-              {products.map(p => (
+              {parentCandidates.map(p => (
                 <option key={p.sku} value={p.sku}>
                   【{p.brand}】 {p.name} ({p.sku}) {p.setQuantity > 1 ? `[既存セット:${p.setQuantity}倍]` : ''}
                 </option>
               ))}
             </select>
+            {parentSearchTerm && (
+              <p className="text-[10px] text-indigo-400 font-mono">
+                検索ヒット: {parentCandidates.length} 件 (セット登録品)
+              </p>
+            )}
           </div>
 
           {parentSku && parentProd ? (
