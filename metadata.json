@@ -1,0 +1,6 @@
+{
+  "name": "発注管理システム",
+  "description": "セット商品対応の商品発注、在庫、販売実績の自動計算と推奨発注管理ツール",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
