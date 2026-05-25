@@ -94,8 +94,12 @@ export const findSalesForProduct = (
 
 export const calculateProductMonthlySales = (
   product: ProductMaster,
-  salesList: SalesData[]
+  salesList: SalesData[],
+  salesOverrides?: Record<string, number>
 ): number => {
+  if (salesOverrides && typeof salesOverrides[product.sku] === 'number') {
+    return salesOverrides[product.sku];
+  }
   const matchedSales = findSalesForProduct(product, salesList);
   const totalQty = matchedSales.reduce((sum, sale) => sum + Number(sale.quantity), 0);
   return totalQty * product.setQuantity;
@@ -105,12 +109,13 @@ export const computeRecommendations = (
   products: ProductMaster[],
   inventoryList: InventoryData[],
   salesList: SalesData[],
-  currentDateStr: string = '2026-05-25'
+  currentDateStr: string = '2026-05-25',
+  salesOverrides?: Record<string, number>
 ): RecommendedOrder[] => {
   return products.map((product) => {
     const inv = findInventoryForProduct(product, inventoryList, products);
     const totalStock = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
-    const monthlySales = calculateProductMonthlySales(product, salesList);
+    const monthlySales = calculateProductMonthlySales(product, salesList, salesOverrides);
 
     const averageDailySales = monthlySales / 30;
     const leadTime = typeof product.leadTime === 'number' ? product.leadTime : 14;

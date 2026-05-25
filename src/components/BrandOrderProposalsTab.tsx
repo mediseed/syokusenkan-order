@@ -23,8 +23,16 @@ interface BrandOrderProposalsTabProps {
   inventoryList: InventoryData[];
   salesList: SalesData[];
   orders: PurchaseOrder[];
-  onRegisterDraft: (target: string, quantities: Record<string, number>) => void;
+  onRegisterDraft: (target: string, quantities: Record<string, number>, deliveryDates?: Record<string, string>) => void;
   addToast: (message: string, type: 'success' | 'error' | 'warning') => void;
+  salesOverrides?: Record<string, number>;
+
+  proposedQuantities: Record<string, number>;
+  onUpdateProposedQuantities: (val: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  proposedDeliveryDates: Record<string, string>;
+  onUpdateProposedDeliveryDates: (val: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  proposedSelectedSkus: Record<string, boolean>;
+  onUpdateProposedSelectedSkus: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
 }
 
 export default function BrandOrderProposalsTab({
@@ -33,7 +41,14 @@ export default function BrandOrderProposalsTab({
   salesList,
   orders,
   onRegisterDraft,
-  addToast
+  addToast,
+  salesOverrides,
+  proposedQuantities,
+  onUpdateProposedQuantities,
+  proposedDeliveryDates,
+  onUpdateProposedDeliveryDates,
+  proposedSelectedSkus,
+  onUpdateProposedSelectedSkus
 }: BrandOrderProposalsTabProps) {
   // Brand filtering & search states
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,7 +66,7 @@ export default function BrandOrderProposalsTab({
         let sc = inv.scStock;
         let logi = inv.logiStock;
 
-        let monthlySales = calculateProductMonthlySales(product, salesList);
+        let monthlySales = calculateProductMonthlySales(product, salesList, salesOverrides);
 
         const isParentInIntegration = !!(product.isBundle && product.bundleItems && product.bundleItems.length > 0);
 
@@ -83,7 +98,7 @@ export default function BrandOrderProposalsTab({
           logi += parentInv.logiStock * qty;
 
           // Aggregage sales
-          const parentSales = calculateProductMonthlySales(parent, salesList);
+          const parentSales = calculateProductMonthlySales(parent, salesList, salesOverrides);
           monthlySales += parentSales;
 
           // Aggregate pending orders
@@ -119,6 +134,15 @@ export default function BrandOrderProposalsTab({
 
         const isCritical = !product.isBundle && totalStock <= reorderPoint && monthlySales > 0;
 
+        let estimatedOutDate = product.isBundle ? '対象外' : '安定 / 実績なし';
+        if (!product.isBundle && monthlySales > 0) {
+          const date = new Date('2026-05-25');
+          date.setDate(date.getDate() + stockDays);
+          estimatedOutDate = date.toISOString().split('T')[0];
+        } else if (!product.isBundle && totalStock === 0) {
+          estimatedOutDate = '在庫切れ';
+        }
+
         return {
           product,
           totalStock,
@@ -129,7 +153,8 @@ export default function BrandOrderProposalsTab({
           stockDays,
           defaultProposal,
           isCritical,
-          isParentInIntegration
+          isParentInIntegration,
+          estimatedOutDate
         };
       })
       // Filter out parenting bundle products (matching default brand_integrated view in InventoryTab.tsx)
@@ -153,30 +178,52 @@ export default function BrandOrderProposalsTab({
     setExpandedBrands(initialExpanded);
   }, [brandsList]);
 
-  // State to store custom user overrides for proposed quantities
-  // Structure: { [sku]: qty }
-  const [proposedOverrides, setProposedOverrides] = useState<Record<string, number>>({});
-  // Track custom manual selection checkmarks
-  // By default, critical items with positive defaultProposal are selected.
-  // Structure: { [sku]: boolean }
-  const [selectedProductSKUs, setSelectedProductSKUs] = useState<Record<string, boolean>>({});
+  // Alias state getters and setters to passed props to keep them in perfect sync globally
+  const proposedOverrides = proposedQuantities;
+  const setProposedOverrides = onUpdateProposedQuantities;
+  const selectedProductSKUs = proposedSelectedSkus;
+  const setSelectedProductSKUs = onUpdateProposedSelectedSkus;
+  const deliveryDateOverrides = proposedDeliveryDates;
+  const setDeliveryDateOverrides = onUpdateProposedDeliveryDates;
 
-  // Initialize overrides and selections when product calculations load
+  // Initialize overrides and selections dynamically without erasing user interactions
   React.useEffect(() => {
-    const defaultOverrides: Record<string, number> = {};
-    const defaultSelections: Record<string, boolean> = {};
+    const nextOverrides = { ...proposedQuantities };
+    const nextSelections = { ...proposedSelectedSkus };
+    const nextDeliveryDates = { ...proposedDeliveryDates };
+    let changed = false;
 
     productCalculations.forEach(calc => {
-      // Put default proposal quantity in overrides
-      defaultOverrides[calc.product.sku] = calc.defaultProposal;
-      // Select automatically if it's in a critical state
+      const sku = calc.product.sku;
+      // Initialize raw override quantity to default forecast suggestion if not loaded yet
+      if (nextOverrides[sku] === undefined) {
+        nextOverrides[sku] = calc.defaultProposal;
+        changed = true;
+      }
+      // Select critical item checkmarks and default delivery date if not set yet
       if (calc.isCritical && calc.defaultProposal > 0) {
-        defaultSelections[calc.product.sku] = true;
+        if (nextSelections[sku] === undefined) {
+          nextSelections[sku] = true;
+          changed = true;
+        }
+        if (!nextDeliveryDates[sku]) {
+          nextDeliveryDates[sku] = '2026-06-08';
+          changed = true;
+        }
+      } else {
+        // Unselected by default for non-critical
+        if (nextSelections[sku] === undefined) {
+          nextSelections[sku] = false;
+          changed = true;
+        }
       }
     });
 
-    setProposedOverrides(defaultOverrides);
-    setSelectedProductSKUs(defaultSelections);
+    if (changed) {
+      onUpdateProposedQuantities(nextOverrides);
+      onUpdateProposedSelectedSkus(nextSelections);
+      onUpdateProposedDeliveryDates(nextDeliveryDates);
+    }
   }, [productCalculations]);
 
   // Toggle brand accordion collapse state
@@ -191,11 +238,18 @@ export default function BrandOrderProposalsTab({
   const handleToggleProductSelect = (sku: string) => {
     setSelectedProductSKUs(prev => {
       const isSelected = !prev[sku];
-      // If selecting, make sure we have a quantity of at least default or 50 if it was 0
+      // If selecting, make sure we have a quantity of at least default or 100 if it was 0
       if (isSelected && (proposedOverrides[sku] || 0) === 0) {
         setProposedOverrides(o => ({
           ...o,
           [sku]: 100 // friendly default to start ordering
+        }));
+      }
+      // If selecting, prefill default delivery date if not set yet
+      if (isSelected && !deliveryDateOverrides[sku]) {
+        setDeliveryDateOverrides(d => ({
+          ...d,
+          [sku]: '2026-06-08'
         }));
       }
       return {
@@ -217,6 +271,13 @@ export default function BrandOrderProposalsTab({
       ...prev,
       [sku]: cleanVal > 0
     }));
+    // If quantity is positive, prefill default delivery date if not set yet
+    if (cleanVal > 0 && !deliveryDateOverrides[sku]) {
+      setDeliveryDateOverrides(d => ({
+        ...d,
+        [sku]: '2026-06-08'
+      }));
+    }
   };
 
   // Calculate brand-aggregated statistics
@@ -307,6 +368,7 @@ export default function BrandOrderProposalsTab({
 
     // Gather selected products with quantities > 0
     const quantitiesToRegister: Record<string, number> = {};
+    const deliveryDatesToRegister: Record<string, string> = {};
     let itemCount = 0;
 
     brandData.productsList.forEach(c => {
@@ -316,6 +378,9 @@ export default function BrandOrderProposalsTab({
 
       if (isSelected && qty > 0) {
         quantitiesToRegister[sku] = qty;
+        if (deliveryDateOverrides[sku]) {
+          deliveryDatesToRegister[sku] = deliveryDateOverrides[sku];
+        }
         itemCount++;
       }
     });
@@ -326,13 +391,14 @@ export default function BrandOrderProposalsTab({
     }
 
     // Call callback to elevate state to App
-    onRegisterDraft(brandName, quantitiesToRegister);
-    addToast(`${brandName} の ${itemCount} 商品の発注希望数量を発注処理（計画）に登録しました！`, 'success');
+    onRegisterDraft(brandName, quantitiesToRegister, deliveryDatesToRegister);
+    addToast(`${brandName} の ${itemCount} 商品の発注希望数量と希望納期を発注処理（計画）に登録しました！`, 'success');
   };
 
   // Click handler to register ALL tea brands consolidated into the order process screen
   const handleRegisterConsolidatedTeaOrder = () => {
     const quantitiesToRegister: Record<string, number> = {};
+    const deliveryDatesToRegister: Record<string, string> = {};
     let itemCount = 0;
 
     productCalculations.forEach(c => {
@@ -344,6 +410,9 @@ export default function BrandOrderProposalsTab({
 
         if (isSelected && qty > 0) {
           quantitiesToRegister[sku] = qty;
+          if (deliveryDateOverrides[sku]) {
+            deliveryDatesToRegister[sku] = deliveryDateOverrides[sku];
+          }
           itemCount++;
         }
       }
@@ -354,8 +423,8 @@ export default function BrandOrderProposalsTab({
       return;
     }
 
-    onRegisterDraft('tea_consolidated', quantitiesToRegister);
-    addToast(`【合計均一お茶統合】の ${itemCount} 商品の発注計画を登録しました！`, 'success');
+    onRegisterDraft('tea_consolidated', quantitiesToRegister, deliveryDatesToRegister);
+    addToast(`【合計均一お茶統合】の ${itemCount} 商品の発注計画と希望納期を登録しました！`, 'success');
   };
 
   return (
@@ -497,6 +566,9 @@ export default function BrandOrderProposalsTab({
                         <th className="py-3 px-3">商品名・SKU</th>
                         <th className="py-3 px-3 text-right">現在庫量</th>
                         <th className="py-3 px-3 text-right">月間販売数</th>
+                        <th className="py-3 px-3 text-right text-emerald-400 font-bold">推奨発注量</th>
+                        <th className="py-3 px-3 text-center text-amber-500">想定在庫切日</th>
+                        <th className="py-3 px-3 text-center text-indigo-300 w-[145px]">希望納期 (指定)</th>
                         <th className="py-3 px-3 text-right">安全在庫</th>
                         <th className="py-3 px-3 text-right">発注点</th>
                         <th className="py-3 px-3 text-right text-indigo-400 hidden lg:table-cell">手配中</th>
@@ -550,6 +622,41 @@ export default function BrandOrderProposalsTab({
                             {/* Monthly Sales */}
                             <td className="py-3 px-3 text-right font-mono text-slate-350">
                               {calc.monthlySales.toLocaleString()}
+                            </td>
+
+                            {/* Recommended Qty */}
+                            <td className="py-3 px-3 text-right font-mono text-emerald-400 font-bold transition-colors">
+                              {calc.defaultProposal > 0 ? `${calc.defaultProposal.toLocaleString()} 個` : '0 個'}
+                            </td>
+
+                            {/* Estimated Out of Stock Date */}
+                            <td className="py-3 px-3 text-center font-mono text-xs">
+                              {calc.product.isBundle ? (
+                                <span className="text-slate-500">-</span>
+                              ) : calc.estimatedOutDate === '在庫切れ' ? (
+                                <span className="text-rose-400 font-bold bg-rose-950/30 px-1.5 py-0.5 rounded border border-rose-900/40">在庫切れ</span>
+                              ) : calc.estimatedOutDate === '安定 / 実績なし' ? (
+                                <span className="text-slate-500 text-[10px]">安定/実績無</span>
+                              ) : (
+                                <span className={calc.isCritical ? 'text-rose-300 font-bold' : 'text-slate-350'}>
+                                  {calc.estimatedOutDate}
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Preferred Delivery Date (Manual Input) */}
+                            <td className="py-2 px-3 text-center w-[145px]">
+                              <input
+                                type="date"
+                                value={deliveryDateOverrides[calc.product.sku] || ''}
+                                onChange={(e) => {
+                                  setDeliveryDateOverrides(prev => ({
+                                    ...prev,
+                                    [calc.product.sku]: e.target.value
+                                  }));
+                                }}
+                                className="bg-slate-950 border border-slate-800 text-slate-350 font-mono text-[11px] py-1 px-1.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 w-[130px] h-[28px] focus:text-white"
+                              />
                             </td>
 
                             {/* Safety Stock */}

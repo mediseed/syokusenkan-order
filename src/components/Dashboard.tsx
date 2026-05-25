@@ -13,6 +13,7 @@ interface DashboardProps {
   products: ProductMaster[];
   inventoryList: InventoryData[];
   salesList: SalesData[];
+  salesOverrides?: Record<string, number>;
   uploadTimestamps?: Record<string, string>;
   onTabChange: (tabId: string) => void;
 }
@@ -21,11 +22,12 @@ export default function Dashboard({
   products,
   inventoryList,
   salesList,
+  salesOverrides,
   uploadTimestamps,
   onTabChange
 }: DashboardProps) {
   // Compute calculated recommendations
-  const recommendations = computeRecommendations(products, inventoryList, salesList);
+  const recommendations = computeRecommendations(products, inventoryList, salesList, '2026-05-25', salesOverrides);
 
   // Calculate standard KPI metrics
   const totalProductsCount = products.length;

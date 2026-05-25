@@ -43,8 +43,18 @@ interface OrderManagementTabProps {
   prefilledDraft?: {
     target: string;
     quantities: Record<string, number>;
+    deliveryDates?: Record<string, string>;
   } | null;
   onClearPrefilledDraft?: () => void;
+  salesOverrides?: Record<string, number>;
+
+  // Shared proposed states
+  proposedQuantities: Record<string, number>;
+  onUpdateProposedQuantities: (val: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  proposedDeliveryDates: Record<string, string>;
+  onUpdateProposedDeliveryDates: (val: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  proposedSelectedSkus: Record<string, boolean>;
+  onUpdateProposedSelectedSkus: (val: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
 }
 
 export default function OrderManagementTab({
@@ -58,7 +68,14 @@ export default function OrderManagementTab({
   onDeleteOrder,
   addToast,
   prefilledDraft,
-  onClearPrefilledDraft
+  onClearPrefilledDraft,
+  salesOverrides,
+  proposedQuantities,
+  onUpdateProposedQuantities,
+  proposedDeliveryDates,
+  onUpdateProposedDeliveryDates,
+  proposedSelectedSkus,
+  onUpdateProposedSelectedSkus
 }: OrderManagementTabProps) {
   // Navigation inside Order Tab: 'planner' (Interactive Wizard) or 'ledger' (Past PO Archives & Stock In)
   const [subTab, setSubTab] = useState<'planner' | 'ledger'>('planner');
@@ -77,10 +94,11 @@ export default function OrderManagementTab({
   const [orderNotes, setOrderNotes] = useState('');
   const [poTitleCustom, setPoTitleCustom] = useState('');
 
-  // Step 1: Brands raw quantities to purchase
-  // {[sku]: qty}
-  const [step1Quantities, setStep1Quantities] = useState<Record<string, number>>({});
-  const [step1DeliveryDates, setStep1DeliveryDates] = useState<Record<string, string>>({});
+  // Step 1: Brands raw quantities to purchase alias to shared props
+  const step1Quantities = proposedQuantities;
+  const setStep1Quantities = onUpdateProposedQuantities;
+  const step1DeliveryDates = proposedDeliveryDates;
+  const setStep1DeliveryDates = onUpdateProposedDeliveryDates;
 
   // Step 3: Rounding weights per integrationCode (or SKU if no code)
   // {[integrationKey]: kg}
@@ -107,13 +125,14 @@ export default function OrderManagementTab({
 
   // Compute standard automated suggestions from sales/stock trends
   const recommendations = useMemo(() => {
-    return computeRecommendations(products, inventoryList, salesList);
-  }, [products, inventoryList, salesList]);
+    return computeRecommendations(products, inventoryList, salesList, '2026-05-25', salesOverrides);
+  }, [products, inventoryList, salesList, salesOverrides]);
 
   // Sync / Reset Step 1 values to recommendation suggestions on load or target toggle
   const targetedProducts = useMemo(() => {
     return products.filter(p => {
       if (!p.isActive) return false;
+
       if (orderTarget === 'tea_consolidated') {
         return p.category === 'お茶';
       } else {
@@ -122,54 +141,51 @@ export default function OrderManagementTab({
     });
   }, [products, orderTarget]);
 
+  // Registered SKUs for current order process derived dynamically (any product with quantity > 0 is registered)
+  const registeredSkus = useMemo(() => {
+    return targetedProducts
+      .filter(p => (proposedQuantities[p.sku] || 0) > 0)
+      .map(p => p.sku);
+  }, [targetedProducts, proposedQuantities]);
+
   // Set suggested items to Draft step 1
   const applySuggestedToStep1 = () => {
-    const qtys: Record<string, number> = {};
-    const dates: Record<string, string> = {};
+    const nextqtys = { ...proposedQuantities };
+    const nextdates = { ...proposedDeliveryDates };
     targetedProducts.forEach(p => {
       const recom = recommendations.find(r => r.product.sku === p.sku);
-      qtys[p.sku] = recom ? recom.recommendedQty : 0;
-      dates[p.sku] = scheduledDate;
+      const recommendedQty = recom ? recom.recommendedQty : 0;
+      nextqtys[p.sku] = recommendedQty;
+      nextdates[p.sku] = scheduledDate;
     });
-    setStep1Quantities(qtys);
-    setStep1DeliveryDates(dates);
-    addToast('推奨発注数量をステップ1に仮入力しました！', 'success');
+    onUpdateProposedQuantities(nextqtys);
+    onUpdateProposedDeliveryDates(nextdates);
+    addToast('推奨発注数量をステップ1に仮入力し、登録しました！', 'success');
   };
 
   const clearStep1Quantities = () => {
-    const qtys: Record<string, number> = {};
+    const nextqtys = { ...proposedQuantities };
     targetedProducts.forEach(p => {
-      qtys[p.sku] = 0;
+      nextqtys[p.sku] = 0;
     });
-    setStep1Quantities(qtys);
-    addToast('すべての仮発注数量を0にリセットしました。', 'warning');
+    onUpdateProposedQuantities(nextqtys);
+    addToast('すべての仮発注数量を0にし、登録を解除しました。', 'warning');
   };
-
-  const isPrefillingRef = React.useRef(false);
-
-  // Run on start
-  useEffect(() => {
-    if (isPrefillingRef.current) {
-      isPrefillingRef.current = false;
-      return;
-    }
-    applySuggestedToStep1();
-  }, [targetedProducts, recommendations, scheduledDate]);
 
   // Sync prefilledDraft into form setup
   useEffect(() => {
     if (prefilledDraft) {
-      isPrefillingRef.current = true;
       setOrderTarget(prefilledDraft.target);
-      setStep1Quantities(prefilledDraft.quantities);
       setActiveStep(1);
       setSubTab('planner');
       
-      const dates: Record<string, string> = {};
+      const nextqtys = { ...proposedQuantities, ...prefilledDraft.quantities };
+      const nextdates = { ...proposedDeliveryDates };
       Object.keys(prefilledDraft.quantities).forEach(sku => {
-        dates[sku] = scheduledDate;
+        nextdates[sku] = (prefilledDraft.deliveryDates && prefilledDraft.deliveryDates[sku]) || scheduledDate;
       });
-      setStep1DeliveryDates(dates);
+      onUpdateProposedQuantities(nextqtys);
+      onUpdateProposedDeliveryDates(nextdates);
 
       if (onClearPrefilledDraft) {
         onClearPrefilledDraft();
@@ -198,6 +214,9 @@ export default function OrderManagementTab({
     }> = {};
 
     targetedProducts.forEach(p => {
+      // ONLY process registered SKUs for ordering
+      if (!registeredSkus.includes(p.sku)) return;
+
       const qty = step1Quantities[p.sku] || 0;
       if (qty <= 0) return;
 
@@ -228,7 +247,7 @@ export default function OrderManagementTab({
     });
 
     return Object.values(groups);
-  }, [targetedProducts, step1Quantities, step1DeliveryDates, scheduledDate]);
+  }, [targetedProducts, step1Quantities, step1DeliveryDates, scheduledDate, registeredSkus]);
 
   // Sync Step 3 rounded values when groups compute
   useEffect(() => {
@@ -525,10 +544,13 @@ export default function OrderManagementTab({
                   }}
                   className="bg-slate-900 border border-slate-800 text-xs font-bold text-emerald-400 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 >
-                  <option value="tea_consolidated">🍵 【合計均一】全お茶ブランド合算</option>
-                  {BRANDS.map(b => (
-                    <option key={b} value={b}>{b} 専売品のみ</option>
-                  ))}
+                  <option value="tea_consolidated">🍵 統合コード (お茶ブランド合算)</option>
+                  <option value="温活農園">温活農園</option>
+                  <option value="大福園">大福園</option>
+                  <option value="ママセレクト">ママセレクト</option>
+                  <option value="MEZZO">MEZZO</option>
+                  <option value="色彩農園">色彩農園</option>
+                  <option value="アメリカ">アメリカ</option>
                 </select>
               </div>
             </div>
@@ -565,15 +587,53 @@ export default function OrderManagementTab({
             })}
           </div>
 
-          {/* -------------------------------------------------------------
-              STEP 1 PANELS: REGISTER BASE QUANTITIES
-             ------------------------------------------------------------- */}
           {activeStep === 1 && (
             <div className="space-y-4">
+              <div className="bg-indigo-950/45 border border-indigo-700/40 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-indigo-200">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>
+                    <strong>同期式発注数量入力：</strong>「ブランド別発注希望」の登録値とリアルタイム同期しています。数量が 1 以上の商品が自動的に Step2 以降の調達プロセスに対象として登録されます。
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 font-semibold">
+                  <button
+                    onClick={() => {
+                      const next = { ...proposedQuantities };
+                      targetedProducts.forEach(p => {
+                        const recom = recommendations.find(r => r.product.sku === p.sku);
+                        const recomQty = (recom && recom.recommendedQty > 0) ? recom.recommendedQty : 100;
+                        if ((next[p.sku] || 0) === 0) {
+                          next[p.sku] = recomQty;
+                        }
+                      });
+                      onUpdateProposedQuantities(next);
+                      addToast('表示中のすべての商品に発注数量を設定しました。', 'success');
+                    }}
+                    className="bg-indigo-900/60 hover:bg-indigo-850 border border-indigo-750 text-indigo-200 px-3 py-1 rounded text-[11px] font-bold transition-colors"
+                  >
+                    全件を発注登録
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = { ...proposedQuantities };
+                      targetedProducts.forEach(p => {
+                        next[p.sku] = 0;
+                      });
+                      onUpdateProposedQuantities(next);
+                      addToast('すべての商品の発注数量を0に設定しました。', 'warning');
+                    }}
+                    className="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 px-3 py-1 rounded text-[11px] font-bold transition-colors"
+                  >
+                    全件解除
+                  </button>
+                </div>
+              </div>
+
               <div className="bg-slate-900 border border-slate-850 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                    <span className="w-1.5 h-3 bg-indigo-505 bg-indigo-550 rounded-sm"></span>
+                    <span className="w-1.5 h-3 bg-indigo-550 rounded-sm"></span>
                     <span>ステップ1：ブランド別確定発注数量（パック個数）の初期登録</span>
                   </h3>
                   <p className="text-slate-400 text-xs mt-1">
@@ -609,6 +669,7 @@ export default function OrderManagementTab({
                         <th className="py-3 px-3 text-center text-indigo-400">推奨発注推奨</th>
                         <th className="py-3 px-4 text-right max-w-[130px] font-bold text-white bg-indigo-950/25">確定発注希望数 (個) *</th>
                         <th className="py-3 px-4 text-center">希望納期</th>
+                        <th className="py-3 px-4 text-center">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-850">
@@ -617,11 +678,19 @@ export default function OrderManagementTab({
                         const inv = findInventoryForProduct(p, inventoryList, products);
                         const totalStock = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
                         
-                        const qtyVal = step1Quantities[p.sku] ?? 0;
-                        const dateVal = step1DeliveryDates[p.sku] || scheduledDate;
+                        const qtyVal = proposedQuantities[p.sku] ?? 0;
+                        const dateVal = proposedDeliveryDates[p.sku] || scheduledDate;
+                        const isRegistered = qtyVal > 0;
 
                         return (
-                          <tr key={p.sku} className="hover:bg-slate-850/40">
+                          <tr 
+                            key={p.sku} 
+                            className={`transition-all duration-150 ${
+                              isRegistered 
+                                ? 'bg-indigo-950/25 hover:bg-indigo-950/35 border-l-2 border-l-indigo-500' 
+                                : 'hover:bg-slate-850/30 border-l-2 border-l-transparent'
+                            }`}
+                          >
                             <td className="py-3 px-4">
                               <p className="font-bold text-slate-100">{p.name}</p>
                               <span className="font-mono text-[10px] text-slate-500">{p.sku}</span>
@@ -629,23 +698,23 @@ export default function OrderManagementTab({
                             </td>
                             <td className="py-3 px-3 font-medium text-slate-200">{p.brand}</td>
                             <td className="py-3 px-3 text-slate-400">{p.weight}g ({p.volume})</td>
-                            <td className="py-3 px-3 text-center font-mono font-medium">{totalStock.toLocaleString()} 個</td>
+                            <td className="py-3 px-3 text-center font-mono font-medium text-slate-300">{totalStock.toLocaleString()} 個</td>
                             <td className="py-3 px-3 text-center">
                               <span className={`text-[11px] font-mono font-bold ${recom && recom.recommendedQty > 0 ? 'text-indigo-400' : 'text-slate-500'}`}>
                                 {recom ? recom.recommendedQty.toLocaleString() : 0} 個
                               </span>
                             </td>
-                            <td className="py-2 px-4 text-right max-w-[130px] bg-indigo-950/10">
+                            <td className={`py-2 px-4 text-right max-w-[130px] transition-colors ${isRegistered ? 'bg-indigo-950/20' : ''}`}>
                               <input
                                 type="number"
                                 min="0"
                                 value={qtyVal === 0 ? '' : qtyVal}
                                 onChange={(e) => {
                                   const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                                  setStep1Quantities(prev => ({ ...prev, [p.sku]: val }));
+                                  onUpdateProposedQuantities(prev => ({ ...prev, [p.sku]: val }));
                                 }}
                                 placeholder="0"
-                                className="w-full bg-slate-950 border border-indigo-950 text-indigo-300 font-mono font-bold text-right py-1.5 px-2.5 rounded text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                                className="w-full bg-slate-950 border border-slate-800 text-indigo-300 font-mono font-bold text-right py-1.5 px-2.5 rounded text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                               />
                             </td>
                             <td className="py-2 px-4 text-center">
@@ -653,10 +722,22 @@ export default function OrderManagementTab({
                                 type="date"
                                 value={dateVal}
                                 onChange={(e) => {
-                                  setStep1DeliveryDates(prev => ({ ...prev, [p.sku]: e.target.value }));
+                                  onUpdateProposedDeliveryDates(prev => ({ ...prev, [p.sku]: e.target.value }));
                                 }}
-                                className="bg-slate-950 border border-slate-850 text-slate-300 font-mono text-[11px] py-1.5 px-2 rounded focus:outline-none"
+                                className="bg-slate-950 border border-slate-850 text-slate-300 font-mono text-[11px] py-1.5 px-2 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               />
+                            </td>
+                            <td className="py-2 px-4 text-center">
+                              <button
+                                onClick={() => {
+                                  onUpdateProposedQuantities(prev => ({ ...prev, [p.sku]: 0 }));
+                                  addToast(`${p.name}の発注希望数量をクリアしました。`, 'warning');
+                                }}
+                                className="text-slate-500 hover:text-red-400 p-1.5 rounded hover:bg-slate-800/60 transition-colors"
+                                title="この商品を除外する"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </td>
                           </tr>
                         );
@@ -670,9 +751,9 @@ export default function OrderManagementTab({
               <div className="flex justify-end pt-4 gap-2">
                 <button
                   onClick={() => {
-                    const totalSelected = (Object.values(step1Quantities) as number[]).reduce((a, b: number) => a + b, 0);
-                    if (totalSelected === 0) {
-                      addToast('発注希望数量が何も入力されていません。', 'warning');
+                    const hasValidOrder = targetedProducts.some(p => (proposedQuantities[p.sku] || 0) > 0);
+                    if (!hasValidOrder) {
+                      addToast('発注数量が1以上の商品がありません。数量を入力してから進んでください。', 'warning');
                       return;
                     }
                     setActiveStep(2);

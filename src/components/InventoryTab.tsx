@@ -18,6 +18,7 @@ interface InventoryTabProps {
   onUpdateOrder: (order: PurchaseOrder) => void;
   uploadTimestamps?: Record<string, string>;
   addToast: (message: string, type: 'success' | 'error' | 'warning') => void;
+  salesOverrides?: Record<string, number>;
 }
 
 export default function InventoryTab({
@@ -28,7 +29,8 @@ export default function InventoryTab({
   onAddOrder,
   onUpdateOrder,
   uploadTimestamps,
-  addToast
+  addToast,
+  salesOverrides,
 }: InventoryTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
@@ -36,6 +38,69 @@ export default function InventoryTab({
   const [viewMode, setViewMode] = useState<'individual' | 'brand_integrated'>('brand_integrated'); // Default to brand_integrated to highlight the integration feature!
   const [expandedBrands, setExpandedBrands] = useState<Record<string, boolean>>({});
   const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({});
+
+  // Column Widths for resizable interactive columns
+  const [colWidths, setColWidths] = useState<Record<string, number>>({
+    sku: 110,
+    name: 260,
+    fbaStock: 90,
+    rslStock: 90,
+    scStock: 90,
+    logiStock: 90,
+    totalStock: 95,
+    monthlySales: 100,
+    safetyStock: 90,
+    reorderPoint: 90,
+    stockDays: 90,
+    estimatedOutDate: 120,
+    pending: 130,
+    ratio: 180,
+    status: 90,
+    action: 115,
+  });
+
+  const handleResizeStart = (colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = colWidths[colKey] || 100;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      setColWidths((prev) => ({
+        ...prev,
+        [colKey]: Math.max(50, startWidth + deltaX),
+      }));
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleResetWidths = () => {
+    setColWidths({
+      sku: 110,
+      name: 260,
+      fbaStock: 90,
+      rslStock: 90,
+      scStock: 90,
+      logiStock: 90,
+      totalStock: 95,
+      monthlySales: 100,
+      safetyStock: 90,
+      reorderPoint: 90,
+      stockDays: 90,
+      estimatedOutDate: 120,
+      pending: 130,
+      ratio: 180,
+      status: 90,
+      action: 115,
+    });
+  };
 
   // Quick Order Modal States
   const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
@@ -68,7 +133,7 @@ export default function InventoryTab({
     let sc = inv.scStock;
     let logi = inv.logiStock;
 
-    let monthlySales = calculateProductMonthlySales(product, salesList);
+    let monthlySales = calculateProductMonthlySales(product, salesList, salesOverrides);
 
     const isParentInIntegration = !!(product.isBundle && product.bundleItems && product.bundleItems.length > 0);
 
@@ -138,7 +203,7 @@ export default function InventoryTab({
           logi += parentInv.logiStock * qty;
 
           // 親商品の月間販売数（P.setQuantity倍されている）も合算
-          const parentSales = calculateProductMonthlySales(parent, salesList);
+          const parentSales = calculateProductMonthlySales(parent, salesList, salesOverrides);
           monthlySales += parentSales;
 
           // 親商品の手配中数量（親の発注残 * quantity）も合算
@@ -567,87 +632,303 @@ export default function InventoryTab({
             <Download className="w-3.5 h-3.5" />
             <span>出力</span>
           </button>
+
+          <button
+            type="button"
+            onClick={handleResetWidths}
+            className="bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-semibold px-2.5 py-2.5 rounded-lg border border-slate-800 transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+            title="列幅を初期状態に戻します"
+          >
+            <span>列幅リセット</span>
+          </button>
         </div>
       </div>
 
       {/* Grid Table Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 border-b border-slate-800/80">
+          <table className="w-full text-xs text-left text-slate-300 table-fixed min-w-[1450px]">
+            <thead className="bg-slate-950 text-slate-400 border-b border-slate-800/80 sticky top-0 z-10">
               <tr>
-                <th onClick={() => handleSort('sku')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 select-none">
-                  <div className="flex items-center gap-1">
-                    SKU <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                <th
+                  style={{ width: `${colWidths.sku}px`, minWidth: `${colWidths.sku}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle"
+                >
+                  <div
+                    onClick={() => handleSort('sku')}
+                    className="flex items-center gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-left"
+                  >
+                    <span className="truncate">SKU</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('sku', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('name')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 select-none">
-                  <div className="flex items-center gap-1">
-                    商品名（ブランド） <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.name}px`, minWidth: `${colWidths.name}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle"
+                >
+                  <div
+                    onClick={() => handleSort('name')}
+                    className="flex items-center gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-left"
+                  >
+                    <span className="truncate">商品名（ブランド）</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('name', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('fbaStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    FBA在庫 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.fbaStock}px`, minWidth: `${colWidths.fbaStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('fbaStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">FBA在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('fbaStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('rslStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    RSL在庫 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.rslStock}px`, minWidth: `${colWidths.rslStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('rslStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">RSL在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('rslStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('scStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    SC在庫 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.scStock}px`, minWidth: `${colWidths.scStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('scStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">SC在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('scStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('logiStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    ロジ在庫 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.logiStock}px`, minWidth: `${colWidths.logiStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('logiStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">ロジ在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('logiStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('totalStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1 bg-slate-950/40">
-                    現在庫 <ArrowUpDown className="w-3 h-3 text-indigo-400" />
+
+                <th
+                  style={{ width: `${colWidths.totalStock}px`, minWidth: `${colWidths.totalStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('totalStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-indigo-300 active:scale-95 transition-all text-right font-bold"
+                  >
+                    <span className="truncate">現在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-indigo-400 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('totalStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('monthlySales')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    月間販売数 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.monthlySales}px`, minWidth: `${colWidths.monthlySales}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('monthlySales')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">月間販売数</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('monthlySales', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('safetyStock')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    安全在庫 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.safetyStock}px`, minWidth: `${colWidths.safetyStock}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('safetyStock')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">安全在庫</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('safetyStock', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('reorderPoint')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    発注点 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.reorderPoint}px`, minWidth: `${colWidths.reorderPoint}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('reorderPoint')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">発注点</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('reorderPoint', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('stockDays')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    在庫日数 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.stockDays}px`, minWidth: `${colWidths.stockDays}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('stockDays')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">在庫日数</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('stockDays', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('estimatedOutDate')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    在庫切れ予想日 <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.estimatedOutDate}px`, minWidth: `${colWidths.estimatedOutDate}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('estimatedOutDate')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">在庫切れ予想日</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('estimatedOutDate', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('pending')} className="py-3.5 px-4 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-right select-none">
-                  <div className="flex items-center justify-end gap-1">
-                    手配中(発注残) <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.pending}px`, minWidth: `${colWidths.pending}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div
+                    onClick={() => handleSort('pending')}
+                    className="flex items-center justify-end gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-right"
+                  >
+                    <span className="truncate">手配中(発注残)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('pending', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th onClick={() => handleSort('ratio')} className="py-3.5 px-5 font-semibold tracking-wider cursor-pointer hover:bg-slate-900 text-left select-none max-w-xs">
-                  <div className="flex items-center gap-1">
-                    在庫充足率（現在庫 / 発注点） <ArrowUpDown className="w-3 h-3 text-slate-500" />
+
+                <th
+                  style={{ width: `${colWidths.ratio}px`, minWidth: `${colWidths.ratio}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-left"
+                >
+                  <div
+                    onClick={() => handleSort('ratio')}
+                    className="flex items-center gap-1 cursor-pointer hover:bg-slate-900/60 p-1 rounded -m-1 truncate text-slate-350 active:scale-95 transition-all text-left"
+                  >
+                    <span className="truncate">在庫充足率（現在庫 / 発注点）</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500 shrink-0" />
                   </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('ratio', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
                 </th>
-                <th className="py-3.5 px-4 font-semibold tracking-wider text-right">状態</th>
-                <th className="py-3.5 px-4 font-semibold tracking-wider text-center">手配操作</th>
+
+                <th
+                  style={{ width: `${colWidths.status}px`, minWidth: `${colWidths.status}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-right"
+                >
+                  <div className="p-1 -m-1 truncate text-slate-350 text-right">
+                    状態
+                  </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('status', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
+                </th>
+
+                <th
+                  style={{ width: `${colWidths.action}px`, minWidth: `${colWidths.action}px` }}
+                  className="relative group/th py-3 px-3 font-semibold tracking-wider select-none bg-slate-950 align-middle text-center"
+                >
+                  <div className="p-1 -m-1 truncate text-slate-350 text-center">
+                    手配操作
+                  </div>
+                  <div
+                    onMouseDown={(e) => handleResizeStart('action', e)}
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-600 transition-colors group-hover/th:bg-slate-850 z-10"
+                    title="ドラッグして幅を調節"
+                  />
+                </th>
               </tr>
             </thead>
 
@@ -669,12 +950,14 @@ export default function InventoryTab({
 
                   return (
                     <tr key={row.product.sku} className="hover:bg-slate-850/40 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-medium text-slate-100">{row.product.sku}</td>
-                      <td className="py-3.5 px-4">
-                        <div className="space-y-0.5">
+                      <td className="py-3.5 px-3 font-mono font-medium text-slate-100 truncate" title={row.product.sku}>
+                        {row.product.sku}
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <div className="space-y-0.5 max-w-full overflow-hidden">
                           <p className="font-semibold text-slate-200 flex items-center gap-1.5 flex-wrap">
                             {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 ? (
-                              <span>
+                              <span className="line-clamp-2" title={`${row.product.name}（${row.integrationBreakdown.reduce((acc, curr) => { const cleaned = curr.name === '単品実在庫' ? row.product.name : curr.name; if (acc.includes(cleaned)) return acc; return [...acc, cleaned]; }, [] as string[]).join('＋')}）`}>
                                 {row.product.name}（
                                 {row.integrationBreakdown
                                   .reduce((acc, curr) => {
@@ -686,19 +969,19 @@ export default function InventoryTab({
                                 ）
                               </span>
                             ) : (
-                              <span>{row.product.name}</span>
+                              <span className="truncate block max-w-full" title={row.product.name}>{row.product.name}</span>
                             )}
                             {row.product.isBundle && (
-                              <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/60 text-[8px] font-bold px-1.5 py-0.2 rounded">セット自動計算</span>
+                              <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/60 text-[8px] font-bold px-1.5 py-0.2 rounded shrink-0">セット自動計算</span>
                             )}
                             {row.product.integrationCode && (
-                              <span className="bg-indigo-950 text-indigo-300 border border-indigo-900/50 text-[8px] font-bold px-1.5 py-0.2 rounded">🔗 統合: {row.product.integrationCode}</span>
+                              <span className="bg-indigo-950 text-indigo-300 border border-indigo-900/50 text-[8px] font-bold px-1.5 py-0.2 rounded shrink-0">🔗 統合: {row.product.integrationCode}</span>
                             )}
                           </p>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] text-slate-500 font-mono">{row.product.brand}</span>
+                            <span className="text-[10px] text-slate-500 font-mono truncate max-w-[100px]" title={row.product.brand}>{row.product.brand}</span>
                             {row.product.setQuantity > 1 && (
-                              <span className="bg-amber-950/60 text-amber-400 border border-amber-900/50 text-[9px] px-1 rounded-sm font-bold">
+                              <span className="bg-amber-950/60 text-amber-400 border border-amber-900/50 text-[9px] px-1 rounded-sm font-bold shrink-0">
                                 セット数 ×{row.product.setQuantity}
                               </span>
                             )}
@@ -760,17 +1043,17 @@ export default function InventoryTab({
                           {row.product.isBundle && row.product.bundleItems && row.product.bundleItems.length > 0 && (
                             <div className="mt-1 bg-slate-950/40 p-1.5 rounded border border-slate-850 text-[10px] space-y-1">
                               <span className="block text-[9px] font-bold text-emerald-400">構成品目の使用量と現在庫:</span>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5">
+                              <div className="grid grid-cols-1 gap-y-0.5">
                                 {row.product.bundleItems.map((item, idx) => {
                                   const child = products.find(p => p.sku === item.sku);
                                   const childInv = findInventoryForProduct(child || { sku: item.sku } as any, inventoryList, products);
                                   const childTotal = childInv.fbaStock + childInv.rslStock + childInv.scStock + childInv.logiStock;
                                   return (
-                                    <div key={idx} className="flex justify-between font-mono text-[9px] text-slate-400">
-                                      <span className="truncate max-w-[140px] text-slate-400" title={child ? child.name : item.sku}>
+                                    <div key={idx} className="flex justify-between font-mono text-[9px] text-slate-400 gap-2">
+                                      <span className="truncate max-w-[110px] text-slate-400" title={child ? child.name : item.sku}>
                                         {child ? child.name : item.sku}
                                       </span>
-                                      <span className="text-slate-350 ml-1.5">
+                                      <span className="text-slate-350 shrink-0">
                                         必要:{item.quantity} / 在庫:{childTotal}
                                       </span>
                                     </div>
@@ -781,31 +1064,31 @@ export default function InventoryTab({
                           )}
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300 whitespace-nowrap">
                         <div>{row.fba.toLocaleString()}</div>
                         {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && row.rawFba !== row.fba && (
                           <div className="text-[9px] text-slate-500 font-sans font-medium">実:{row.rawFba}</div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300 whitespace-nowrap">
                         <div>{row.rsl.toLocaleString()}</div>
                         {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && row.rawRsl !== row.rsl && (
                           <div className="text-[9px] text-slate-500 font-sans font-medium">実:{row.rawRsl}</div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300 whitespace-nowrap">
                         <div>{row.sc.toLocaleString()}</div>
                         {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && row.rawSc !== row.sc && (
                           <div className="text-[9px] text-slate-500 font-sans font-medium">実:{row.rawSc}</div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300 whitespace-nowrap">
                         <div>{row.logi.toLocaleString()}</div>
                         {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && row.rawLogi !== row.logi && (
                           <div className="text-[9px] text-slate-500 font-sans font-medium">実:{row.rawLogi}</div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-100 bg-slate-950/20">
+                      <td className="py-3.5 px-3 text-right font-mono font-bold text-slate-100 bg-slate-950/20 whitespace-nowrap">
                         <div>{row.totalStock.toLocaleString()}</div>
                         {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && (row.rawFba + row.rawRsl + row.rawSc + row.rawLogi) !== row.totalStock && (
                           <div className="text-[9px] text-indigo-400/70 font-sans font-semibold">実:{row.rawFba + row.rawRsl + row.rawSc + row.rawLogi}</div>
@@ -813,12 +1096,12 @@ export default function InventoryTab({
                       </td>
                       
                       {/* 月間販売数 */}
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300 whitespace-nowrap">
                         <div>{row.monthlySales.toLocaleString()}</div>
                       </td>
 
                       {/* 安全在庫 */}
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-400">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-400 whitespace-nowrap">
                         {row.product.isBundle ? (
                           <span className="text-slate-600 font-sans">-</span>
                         ) : (
@@ -827,7 +1110,7 @@ export default function InventoryTab({
                       </td>
 
                       {/* 発注点 */}
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-400">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-400 whitespace-nowrap">
                         {row.product.isBundle ? (
                           <span className="text-slate-600 font-sans">-</span>
                         ) : (
@@ -836,7 +1119,7 @@ export default function InventoryTab({
                       </td>
 
                       {/* 在庫日数 (切迫度により色分け) */}
-                      <td className="py-3.5 px-4 text-right font-mono">
+                      <td className="py-3.5 px-3 text-right font-mono whitespace-nowrap">
                         {row.product.isBundle ? (
                           <span className="text-slate-600 font-sans">-</span>
                         ) : row.stockDays >= 9999 ? (
@@ -849,7 +1132,7 @@ export default function InventoryTab({
                       </td>
 
                       {/* 在庫切れ予想日 */}
-                      <td className="py-3.5 px-4 text-right font-mono text-xs">
+                      <td className="py-3.5 px-3 text-right font-mono text-xs whitespace-nowrap">
                         {row.product.isBundle ? (
                           <span className="text-slate-600 font-sans">-</span>
                         ) : row.stockDays >= 9999 ? (
@@ -862,16 +1145,15 @@ export default function InventoryTab({
                       </td>
 
                       {/* 発注状況・発注残（手配中） */}
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                      <td className="py-3.5 px-3 text-right font-mono text-slate-300">
                         {row.pendingQty > 0 ? (
-                          <div className="space-y-0.5">
-                            <span className="text-amber-450 font-bold text-xs bg-amber-950/50 border border-amber-900/50 px-2 py-0.5 rounded inline-block text-[11px]">
+                          <div className="space-y-0.5 max-w-full overflow-hidden">
+                            <span className="text-amber-450 font-bold text-xs bg-amber-950/50 border border-amber-900/50 px-2 py-0.5 rounded inline-block text-[11px] shrink-0">
                               {row.pendingQty.toLocaleString()}
                             </span>
-                            {/* ホバー時もしくは小さなテキストで納期などの予定を表示 */}
-                            <div className="text-[9px] text-slate-400 font-sans leading-none flex flex-col items-end gap-1 mt-1.5 min-w-[100px]">
+                            <div className="text-[9px] text-slate-400 font-sans leading-none flex flex-col items-end gap-1 mt-1.5 min-w-[100px] overflow-hidden">
                               {row.pendingDetails.map((detail, dIdx) => (
-                                <span key={dIdx} className="truncate max-w-[120px] text-slate-400 border border-slate-800 bg-slate-950 px-1 py-0.5 rounded text-[8px]" title={`${detail.groupName}: ${detail.qty}個`}>
+                                <span key={dIdx} className="truncate max-w-full text-slate-400 border border-slate-800 bg-slate-950 px-1 py-0.5 rounded text-[8px]" title={`${detail.groupName}: ${detail.qty}個`}>
                                   📅 {detail.deliveryDate.substring(5)} ({detail.qty}個)
                                 </span>
                               ))}
@@ -883,9 +1165,9 @@ export default function InventoryTab({
                       </td>
                       
                       {/* Interactive responsive progress bar */}
-                      <td className="py-3.5 px-5 max-w-xs">
+                      <td className="py-3.5 px-3 max-w-full overflow-hidden">
                         {row.product.isBundle ? (
-                          <span className="text-slate-500 italic text-[11px]">セット商品のため対象外</span>
+                          <span className="text-slate-500 italic text-[11px] block truncate">セット商品のため対象外</span>
                         ) : (
                           <div className="space-y-1.5">
                             <div className="flex justify-between items-center text-[10px]">
@@ -916,26 +1198,26 @@ export default function InventoryTab({
                       </td>
 
                       {/* Out of stock warning trigger */}
-                      <td className="py-3.5 px-4 text-right">
+                      <td className="py-3.5 px-3 text-right whitespace-nowrap">
                         {row.product.isBundle ? (
                           <span className="inline-flex items-center gap-1 bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded text-[10px]">
                             -
                           </span>
                         ) : row.isCritical ? (
                           <span className="inline-flex items-center gap-1 bg-red-950 border border-red-950 text-red-400 font-semibold px-2 py-0.5 rounded text-[10px] animate-pulse">
-                            <AlertTriangle className="w-3 h-3" />
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
                             <span>要発注</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 bg-emerald-990 border border-emerald-950 text-emerald-400 font-semibold px-2 py-0.5 rounded text-[10px]">
-                            <CheckCircle className="w-3 h-3" />
+                            <CheckCircle className="w-3 h-3 shrink-0" />
                             <span>充足</span>
                           </span>
                         )}
                       </td>
 
                       {/* クイック手配登録 */}
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-3.5 px-3 text-center whitespace-nowrap">
                         <button
                           onClick={() => {
                             setSelectedProductForOrder(row.product);
@@ -946,7 +1228,7 @@ export default function InventoryTab({
                           }}
                           className="bg-slate-850 hover:bg-slate-750 text-indigo-300 font-bold text-[10px] px-2.5 py-1.5 rounded-lg border border-indigo-950 hover:text-white transition-all flex items-center justify-center gap-1 mx-auto cursor-pointer"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-3.5 h-3.5 shrink-0" />
                           <span>手配状況追加</span>
                         </button>
                       </td>

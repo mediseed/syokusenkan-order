@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory, ShoppingCart } from 'lucide-react';
+import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory, ShoppingCart, Truck, TrendingUp } from 'lucide-react';
 
 import { ProductMaster, InventoryData, SalesData, PurchaseOrder, Manufacturer } from './types';
 import { initialProducts, initialInventory, initialSales, initialManufacturers } from './data/mockData';
@@ -17,12 +17,32 @@ import OrderManagementTab from './components/OrderManagementTab';
 import CSVImportModal from './components/CSVImportModal';
 import ManufacturerTab from './components/ManufacturerTab';
 import BrandOrderProposalsTab from './components/BrandOrderProposalsTab';
+import InboundManagementTab from './components/InboundManagementTab';
+import MonthlySalesTab from './components/MonthlySalesTab';
 
 export default function App() {
   // Global Shared States
   const [products, setProducts] = useState<ProductMaster[]>(initialProducts);
   const [inventoryList, setInventoryList] = useState<InventoryData[]>(initialInventory);
   const [salesList, setSalesList] = useState<SalesData[]>(initialSales);
+
+  // Demand forecasting adjust overrides state with localStorage persistence
+  const [salesOverrides, setSalesOverrides] = useState<Record<string, number>>(() => {
+    const cached = localStorage.getItem('healthon_po_sales_overrides');
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return {};
+  });
+
+  const handleUpdateSalesOverrides = (newOverrides: Record<string, number>) => {
+    setSalesOverrides(newOverrides);
+    localStorage.setItem('healthon_po_sales_overrides', JSON.stringify(newOverrides));
+  };
 
   // Manufacturers States with localStorage Support
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>(() => {
@@ -143,6 +163,55 @@ export default function App() {
     sales: '2026/05/25 13:32',
   });
 
+  // Shared proposed quantities and delivery dates
+  const [proposedQuantities, setProposedQuantities] = useState<Record<string, number>>(() => {
+    const cached = localStorage.getItem('healthon_po_proposed_quantities');
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) {}
+    }
+    return {};
+  });
+
+  const [proposedDeliveryDates, setProposedDeliveryDates] = useState<Record<string, string>>(() => {
+    const cached = localStorage.getItem('healthon_po_proposed_delivery_dates');
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) {}
+    }
+    return {};
+  });
+
+  const [proposedSelectedSkus, setProposedSelectedSkus] = useState<Record<string, boolean>>(() => {
+    const cached = localStorage.getItem('healthon_po_proposed_selected_skus');
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) {}
+    }
+    return {};
+  });
+
+  const handleUpdateProposedQuantities = (newVal: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => {
+    setProposedQuantities(prev => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      localStorage.setItem('healthon_po_proposed_quantities', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleUpdateProposedDeliveryDates = (newVal: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    setProposedDeliveryDates(prev => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      localStorage.setItem('healthon_po_proposed_delivery_dates', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleUpdateProposedSelectedSkus = (newVal: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+    setProposedSelectedSkus(prev => {
+      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+      localStorage.setItem('healthon_po_proposed_selected_skus', JSON.stringify(next));
+      return next;
+    });
+  };
+
   // Active navigation tab
   const [activeTab, setActiveTab ] = useState<string>('dashboard');
 
@@ -150,10 +219,15 @@ export default function App() {
   const [prefilledDraft, setPrefilledDraft] = useState<{
     target: string;
     quantities: Record<string, number>;
+    deliveryDates?: Record<string, string>;
   } | null>(null);
 
-  const handleRegisterDraftToOrder = (target: string, quantities: Record<string, number>) => {
-    setPrefilledDraft({ target, quantities });
+  const handleRegisterDraftToOrder = (
+    target: string,
+    quantities: Record<string, number>,
+    deliveryDates?: Record<string, string>
+  ) => {
+    setPrefilledDraft({ target, quantities, deliveryDates });
     setActiveTab('orders');
   };
 
@@ -319,8 +393,10 @@ export default function App() {
             { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
             { id: 'products', label: '商品マスタ管理', icon: Boxes },
             { id: 'inventory', label: '在庫状況一覧', icon: Boxes },
+            { id: 'sales', label: '月間販売数修正', icon: TrendingUp },
             { id: 'proposals', label: 'ブランド別発注希望', icon: ShoppingCart },
             { id: 'orders', label: '発注処理', icon: ClipboardList },
+            { id: 'inbound', label: '入庫状況・調整', icon: Truck },
             { id: 'manufacturers', label: 'メーカーマスタ管理', icon: Factory },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -351,6 +427,7 @@ export default function App() {
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            salesOverrides={salesOverrides}
             uploadTimestamps={uploadTimestamps}
             onTabChange={(tabId) => setActiveTab(tabId)}
           />
@@ -372,10 +449,21 @@ export default function App() {
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            salesOverrides={salesOverrides}
             orders={orders}
             onAddOrder={handleAddOrder}
             onUpdateOrder={handleUpdateOrder}
             uploadTimestamps={uploadTimestamps}
+            addToast={addToast}
+          />
+        )}
+
+        {activeTab === 'sales' && (
+          <MonthlySalesTab
+            products={products}
+            salesList={salesList}
+            salesOverrides={salesOverrides}
+            onUpdateSalesOverrides={handleUpdateSalesOverrides}
             addToast={addToast}
           />
         )}
@@ -385,9 +473,16 @@ export default function App() {
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            salesOverrides={salesOverrides}
             orders={orders}
             onRegisterDraft={handleRegisterDraftToOrder}
             addToast={addToast}
+            proposedQuantities={proposedQuantities}
+            onUpdateProposedQuantities={handleUpdateProposedQuantities}
+            proposedDeliveryDates={proposedDeliveryDates}
+            onUpdateProposedDeliveryDates={handleUpdateProposedDeliveryDates}
+            proposedSelectedSkus={proposedSelectedSkus}
+            onUpdateProposedSelectedSkus={handleUpdateProposedSelectedSkus}
           />
         )}
 
@@ -397,6 +492,7 @@ export default function App() {
             manufacturers={manufacturers}
             inventoryList={inventoryList}
             salesList={salesList}
+            salesOverrides={salesOverrides}
             orders={orders}
             onAddOrder={handleAddOrder}
             onUpdateOrder={handleUpdateOrder}
@@ -404,6 +500,20 @@ export default function App() {
             addToast={addToast}
             prefilledDraft={prefilledDraft}
             onClearPrefilledDraft={() => setPrefilledDraft(null)}
+            proposedQuantities={proposedQuantities}
+            onUpdateProposedQuantities={handleUpdateProposedQuantities}
+            proposedDeliveryDates={proposedDeliveryDates}
+            onUpdateProposedDeliveryDates={handleUpdateProposedDeliveryDates}
+            proposedSelectedSkus={proposedSelectedSkus}
+            onUpdateProposedSelectedSkus={handleUpdateProposedSelectedSkus}
+          />
+        )}
+
+        {activeTab === 'inbound' && (
+          <InboundManagementTab
+            orders={orders}
+            onUpdateOrder={handleUpdateOrder}
+            addToast={addToast}
           />
         )}
 
