@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Search, ArrowUpDown, Download, CheckCircle, AlertTriangle, HelpCircle, Plus, Truck, Calendar, User, FileText, Info } from 'lucide-react';
+import { Search, ArrowUpDown, Download, CheckCircle, AlertTriangle, HelpCircle, Plus, Truck, Calendar, User, FileText, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import { ProductMaster, InventoryData, SalesData, PurchaseOrder } from '../types';
 import { BRANDS } from '../data/mockData';
 import { findInventoryForProduct, calculateProductMonthlySales, exportToCSV } from '../utils/calculations';
@@ -35,6 +35,7 @@ export default function InventoryTab({
   const [selectedStockLevel, setSelectedStockLevel] = useState<'all' | 'critical' | 'healthy'>('all');
   const [viewMode, setViewMode] = useState<'individual' | 'brand_integrated'>('brand_integrated'); // Default to brand_integrated to highlight the integration feature!
   const [expandedBrands, setExpandedBrands] = useState<Record<string, boolean>>({});
+  const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({});
 
   // Quick Order Modal States
   const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
@@ -705,26 +706,54 @@ export default function InventoryTab({
                           
                           {/* Brand Integration Breakdown Panel */}
                           {viewMode === 'brand_integrated' && row.integrationBreakdown && row.integrationBreakdown.length > 1 && (
-                            <div className="mt-2 bg-slate-950/70 p-2 border border-slate-800 text-[10px] rounded-lg space-y-1 max-w-sm shadow-inner">
-                              <span className="block text-[8px] font-semibold text-indigo-400 uppercase tracking-wider">
-                                🔗 ブランドマスタ統合・合算内訳（単品数換算）:
-                              </span>
-                              <div className="space-y-1 divide-y divide-slate-850/50">
-                                {row.integrationBreakdown.map((item, idx) => {
-                                  const itemTotal = item.fba + item.rsl + item.sc + item.logi;
-                                  const itemUnifiedTotal = itemTotal * item.qty;
-                                  return (
-                                    <div key={idx} className="flex justify-between items-center text-[9px] text-slate-400 pt-1 first:pt-0">
-                                      <span className="truncate max-w-[170px] text-slate-350" title={item.name}>
-                                        {item.name} {item.qty > 1 && <span className="text-[8px] px-1 bg-amber-950 text-amber-400 border border-amber-900/50 font-bold rounded">×{item.qty}</span>}
-                                      </span>
-                                      <span className="font-mono text-right text-slate-300">
-                                        実数:{itemTotal} &rarr; <span className="text-white font-bold">{itemUnifiedTotal}袋</span>
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                            <div className="mt-1.5 space-y-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedDetails(prev => ({
+                                    ...prev,
+                                    [row.product.sku]: !prev[row.product.sku]
+                                  }));
+                                }}
+                                className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-400 bg-indigo-950/40 hover:bg-indigo-900/30 border border-indigo-900/40 px-2 py-0.5 rounded cursor-pointer transition-all active:scale-95"
+                              >
+                                {expandedDetails[row.product.sku] ? (
+                                  <>
+                                    <ChevronUp className="w-3 h-3" />
+                                    <span>合算内訳を閉じる</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-3 h-3" />
+                                    <span>合算内訳を表示 ({row.integrationBreakdown.length}点)</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {expandedDetails[row.product.sku] && (
+                                <div className="bg-slate-950/70 p-2 border border-slate-800 text-[10px] rounded-lg space-y-1 max-w-sm shadow-inner transition-all animate-in fade-in duration-100">
+                                  <span className="block text-[8px] font-semibold text-indigo-400 uppercase tracking-wider">
+                                    🔗 ブランドマスタ統合・合算内訳（単品数換算）:
+                                  </span>
+                                  <div className="space-y-1 divide-y divide-slate-850/50">
+                                    {row.integrationBreakdown.map((item, idx) => {
+                                      const itemTotal = item.fba + item.rsl + item.sc + item.logi;
+                                      const itemUnifiedTotal = itemTotal * item.qty;
+                                      return (
+                                        <div key={idx} className="flex justify-between items-center text-[9px] text-slate-400 pt-1 first:pt-0">
+                                          <span className="truncate max-w-[170px] text-slate-350" title={item.name}>
+                                            {item.name} {item.qty > 1 && <span className="text-[8px] px-1 bg-amber-950 text-amber-400 border border-amber-900/50 font-bold rounded">×{item.qty}</span>}
+                                          </span>
+                                          <span className="font-mono text-right text-slate-300">
+                                            実数:{itemTotal} &rarr; <span className="text-white font-bold">{itemUnifiedTotal}袋</span>
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
 

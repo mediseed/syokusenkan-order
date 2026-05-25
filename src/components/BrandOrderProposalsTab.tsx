@@ -40,14 +40,109 @@ export default function BrandOrderProposalsTab({
   const [showCriticalOnly, setShowCriticalOnly] = useState(false);
   const [expandedBrands, setExpandedBrands] = useState<Record<string, boolean>>({});
 
-  // Unique list of brands available in active products
+  // Compute stats and compile-time details for active non-parent products (matching InventoryTab.tsx "ブランドマスタ統合ビュー")
+  const productCalculations = useMemo(() => {
+    return products
+      .map(product => {
+        // Find raw warehouse stock (without automatic bundle sum first)
+        const inv = findInventoryForProduct(product, inventoryList);
+        let fba = inv.fbaStock;
+        let rsl = inv.rslStock;
+        let sc = inv.scStock;
+        let logi = inv.logiStock;
+
+        let monthlySales = calculateProductMonthlySales(product, salesList);
+
+        const isParentInIntegration = !!(product.isBundle && product.bundleItems && product.bundleItems.length > 0);
+
+        // If the product has parent integration bundles, aggregate parent's inventory, sales, and pending orders
+        const parentProducts = products.filter(
+          (p) => p.isBundle && p.bundleItems?.some((item) => item.sku.toLowerCase() === product.sku.toLowerCase())
+        );
+
+        // Sum pending quantities for the product itself
+        let pendingQty = 0;
+        const pendingOrders = (orders || []).filter(o => o.status === '発注済' || o.status === '検収中/入庫中');
+        
+        pendingOrders.forEach(order => {
+          const matchItem = order.items.find(it => it.sku.toLowerCase() === product.sku.toLowerCase());
+          if (matchItem) {
+            pendingQty += matchItem.requestedQty;
+          }
+        });
+
+        // Add parent contribution (summing it up just as in InventoryTab.tsx)
+        parentProducts.forEach((parent) => {
+          const parentInv = findInventoryForProduct(parent, inventoryList);
+          const link = parent.bundleItems?.find((item) => item.sku.toLowerCase() === product.sku.toLowerCase());
+          const qty = link ? link.quantity : 1;
+
+          fba += parentInv.fbaStock * qty;
+          rsl += parentInv.rslStock * qty;
+          sc += parentInv.scStock * qty;
+          logi += parentInv.logiStock * qty;
+
+          // Aggregage sales
+          const parentSales = calculateProductMonthlySales(parent, salesList);
+          monthlySales += parentSales;
+
+          // Aggregate pending orders
+          let parentPending = 0;
+          pendingOrders.forEach(order => {
+            const matchItem = order.items.find(it => it.sku.toLowerCase() === parent.sku.toLowerCase());
+            if (matchItem) {
+              parentPending += matchItem.requestedQty;
+            }
+          });
+          pendingQty += parentPending * qty;
+        });
+
+        const totalStock = fba + rsl + sc + logi;
+
+        const averageDailySales = monthlySales / 30;
+        const leadTime = typeof product.leadTime === 'number' ? product.leadTime : 14;
+
+        // Bundle exclusion (as sets themselves don't carry inventory/reorders directly)
+        const safetyStock = product.isBundle ? 0 : (typeof product.safetyStock === 'number' ? product.safetyStock : Math.round(averageDailySales * 7));
+        const reorderPoint = product.isBundle ? 0 : Math.round((averageDailySales * leadTime) + safetyStock);
+
+        let stockDays = 9999;
+        if (!product.isBundle && monthlySales > 0) {
+          stockDays = Math.round((totalStock / monthlySales) * 30);
+        }
+
+        let defaultProposal = 0;
+        if (!product.isBundle && totalStock <= reorderPoint && monthlySales > 0) {
+          const baseProposal = reorderPoint * 1.5;
+          defaultProposal = Math.max(50, Math.ceil(baseProposal / 10) * 10);
+        }
+
+        const isCritical = !product.isBundle && totalStock <= reorderPoint && monthlySales > 0;
+
+        return {
+          product,
+          totalStock,
+          monthlySales,
+          safetyStock,
+          reorderPoint,
+          pendingQty,
+          stockDays,
+          defaultProposal,
+          isCritical,
+          isParentInIntegration
+        };
+      })
+      // Filter out parenting bundle products (matching default brand_integrated view in InventoryTab.tsx)
+      .filter(calc => calc.product.isActive && !calc.isParentInIntegration);
+  }, [products, inventoryList, salesList, orders]);
+
+  // Unique list of brands available in the filtered list
   const brandsList = useMemo(() => {
-    const brands = products
-      .filter(p => p.isActive)
-      .map(p => p.brand)
+    const brands = productCalculations
+      .map(c => c.product.brand)
       .filter(Boolean);
     return Array.from(new Set(brands));
-  }, [products]);
+  }, [productCalculations]);
 
   // Expand all brands by default
   React.useEffect(() => {
@@ -57,61 +152,6 @@ export default function BrandOrderProposalsTab({
     });
     setExpandedBrands(initialExpanded);
   }, [brandsList]);
-
-  // Compute stats and compile-time details for all active products
-  const productCalculations = useMemo(() => {
-    return products.map(product => {
-      const inv = findInventoryForProduct(product, inventoryList, products);
-      const totalStock = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
-      const monthlySales = calculateProductMonthlySales(product, salesList);
-
-      const averageDailySales = monthlySales / 30;
-      const leadTime = typeof product.leadTime === 'number' ? product.leadTime : 14;
-
-      // Bundle exclusion
-      const safetyStock = product.isBundle ? 0 : (typeof product.safetyStock === 'number' ? product.safetyStock : Math.round(averageDailySales * 7));
-      const reorderPoint = product.isBundle ? 0 : Math.round((averageDailySales * leadTime) + safetyStock);
-
-      let stockDays = 9999;
-      if (!product.isBundle && monthlySales > 0) {
-        stockDays = Math.round((totalStock / monthlySales) * 30);
-      }
-
-      // Calculate active inbound / pending quantities
-      let pendingQty = 0;
-      const activeOrders = orders.filter(o => o.status === '発注済' || o.status === '検収中/入庫中');
-      activeOrders.forEach(order => {
-        const item = order.items.find(it => it.sku.toLowerCase() === product.sku.toLowerCase());
-        if (item) {
-          pendingQty += item.requestedQty;
-        }
-      });
-
-      // Default logic for proposed quantity:
-      // If stock is below reorder point AND it's not a bundle, propose reorderPoint * 1.5 (rounded up to nearest 10)
-      // Otherwise default proposal is 0.
-      let defaultProposal = 0;
-      if (!product.isBundle && totalStock <= reorderPoint && monthlySales > 0) {
-        const baseProposal = reorderPoint * 1.5;
-        // round to nearest 10, minimum of 50
-        defaultProposal = Math.max(50, Math.ceil(baseProposal / 10) * 10);
-      }
-
-      const isCritical = !product.isBundle && totalStock <= reorderPoint && monthlySales > 0;
-
-      return {
-        product,
-        totalStock,
-        monthlySales,
-        safetyStock,
-        reorderPoint,
-        pendingQty,
-        stockDays,
-        defaultProposal,
-        isCritical
-      };
-    });
-  }, [products, inventoryList, salesList, orders]);
 
   // State to store custom user overrides for proposed quantities
   // Structure: { [sku]: qty }
