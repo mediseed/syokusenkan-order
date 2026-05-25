@@ -1,0 +1,145 @@
+{
+  "entities": {
+    "ProductMaster": {
+      "title": "ProductMaster",
+      "description": "Product master details and configurations",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "brand": { "type": "string" },
+        "name": { "type": "string" },
+        "volume": { "type": "string" },
+        "weight": { "type": "number" },
+        "category": { "type": "string" },
+        "setQuantity": { "type": "number" },
+        "fbaSku": { "type": "string" },
+        "rslSku": { "type": "string" },
+        "scCode": { "type": "string" },
+        "logiId": { "type": "string" },
+        "rawMaterialProducer": { "type": "string" },
+        "fillingParty": { "type": "string" },
+        "leadTime": { "type": "number" },
+        "safetyStock": { "type": "number" },
+        "isBundle": { "type": "boolean" },
+        "integrationCode": { "type": "string" },
+        "orderUnitKg": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["sku", "brand", "name", "isActive"]
+    },
+    "InventoryData": {
+      "title": "InventoryData",
+      "description": "Stock levels across warehouses",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "fbaStock": { "type": "number" },
+        "rslStock": { "type": "number" },
+        "scStock": { "type": "number" },
+        "logiStock": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["sku", "fbaStock", "rslStock", "scStock", "logiStock"]
+    },
+    "SalesData": {
+      "title": "SalesData",
+      "description": "Sales logs and records of transactions",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "quantity": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["sku", "quantity", "date"]
+    },
+    "Manufacturer": {
+      "title": "Manufacturer",
+      "description": "Manufacturer master list contacts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "contactName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "fax": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "name", "type"]
+    },
+    "PurchaseOrderItem": {
+      "title": "PurchaseOrderItem",
+      "description": "Individual ordered item in a PO",
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" },
+        "productName": { "type": "string" },
+        "brand": { "type": "string" },
+        "requestedQty": { "type": "number" },
+        "weight": { "type": "number" },
+        "orderUnitKg": { "type": "number" },
+        "calculatedWeightKg": { "type": "number" },
+        "adjustedWeightKg": { "type": "number" },
+        "adjustedQty": { "type": "number" },
+        "deliveryDate": { "type": "string" }
+      },
+      "required": ["sku", "productName", "brand", "requestedQty"]
+    },
+    "PurchaseOrder": {
+      "title": "PurchaseOrder",
+      "description": "Purchase order records ledger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "groupName": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "scheduledDeliveryDate": { "type": "string" },
+        "assignedStaff": { "type": "string" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "groupName", "orderDate", "status"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global user workspace configurations and sales multipliers/proposals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "overrides": { "type": "object" },
+        "quantities": { "type": "object" },
+        "deliveryDates": { "type": "object" },
+        "selectedSkus": { "type": "object" },
+        "uploadTimestamps": { "type": "object" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/products/{sku}": {
+      "schema": "ProductMaster",
+      "description": "Product master table"
+    },
+    "/inventory/{sku}": {
+      "schema": "InventoryData",
+      "description": "Warehouse stock levels table"
+    },
+    "/sales/{docId}": {
+      "schema": "SalesData",
+      "description": "Sales history records"
+    },
+    "/manufacturers/{id}": {
+      "schema": "Manufacturer",
+      "description": "Supplier / raw material and processing factory directory"
+    },
+    "/orders/{id}": {
+      "schema": "PurchaseOrder",
+      "description": "Official purchase orders tracker"
+    },
+    "/settings/{settingId}": {
+      "schema": "AppSettings",
+      "description": "Global application properties and planning workspace states"
+    }
+  }
+}

@@ -33,6 +33,7 @@ export default function ProductMasterTab({
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [skuToDeleteConfirm, setSkuToDeleteConfirm] = useState<string | null>(null);
 
   // Sorting
   const [sortField, setSortField] = useState<keyof ProductMaster>('sku');
@@ -759,29 +760,46 @@ export default function ProductMasterTab({
                       </button>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end space-x-1.5">
-                        {/* Edit block */}
-                        <button
-                          onClick={() => openEditModal(p)}
-                          className="p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded transition"
-                          title="編集"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        {/* Delete block */}
-                        <button
-                          onClick={() => {
-                            if (confirm(`SKU「${p.sku}」の商品をマスタから完全に削除してよろしいですか？`)) {
+                      {skuToDeleteConfirm === p.sku ? (
+                        <div className="flex items-center justify-end gap-1.5 bg-rose-950/70 border border-rose-900/50 p-1 rounded-md max-w-[120px] ml-auto">
+                          <span className="text-[10px] text-rose-300 font-bold px-0.5 select-none font-sans">削除しますか？</span>
+                          <button
+                            onClick={() => {
                               onDeleteProduct(p.sku);
-                              addToast(`商品「${p.sku}」を削除しました`, 'warning');
-                            }
-                          }}
-                          className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition"
-                          title="削除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                              addToast(`商品「${p.sku}」をマスタから完全に削除しました。`, 'warning');
+                              setSkuToDeleteConfirm(null);
+                            }}
+                            className="bg-rose-700 hover:bg-rose-600 border border-rose-600/50 text-white font-bold rounded px-1.5 py-0.5 text-[9px] transition-colors"
+                          >
+                            はい
+                          </button>
+                          <button
+                            onClick={() => setSkuToDeleteConfirm(null)}
+                            className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold rounded px-1.5 py-0.5 text-[9px] transition-colors"
+                          >
+                            いいえ
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end space-x-1.5">
+                          {/* Edit block */}
+                          <button
+                            onClick={() => openEditModal(p)}
+                            className="p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded transition"
+                            title="編集"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          {/* Delete block */}
+                          <button
+                            onClick={() => setSkuToDeleteConfirm(p.sku)}
+                            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition"
+                            title="削除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))

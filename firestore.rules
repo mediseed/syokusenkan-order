@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Products table
+    match /products/{sku} {
+      allow read, write: if isSignedIn() && isValidId(sku);
+    }
+
+    // Inventory table
+    match /inventory/{sku} {
+      allow read, write: if isSignedIn() && isValidId(sku);
+    }
+
+    // Sales metrics/records
+    match /sales/{docId} {
+      allow read, write: if isSignedIn() && isValidId(docId);
+    }
+
+    // Manufacturers directory
+    match /manufacturers/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    // PO Orders
+    match /orders/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    // Global settings / proposals
+    match /settings/{settingId} {
+      allow read, write: if isSignedIn() && isValidId(settingId);
+    }
+  }
+}

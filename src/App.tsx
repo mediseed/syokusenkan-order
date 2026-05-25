@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory, ShoppingCart, Truck, TrendingUp } from 'lucide-react';
 
 import { ProductMaster, InventoryData, SalesData, PurchaseOrder, Manufacturer } from './types';
@@ -20,138 +20,17 @@ import BrandOrderProposalsTab from './components/BrandOrderProposalsTab';
 import InboundManagementTab from './components/InboundManagementTab';
 import MonthlySalesTab from './components/MonthlySalesTab';
 
+import { db, handleFirestoreError, OperationType } from './lib/firebase';
+import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+
 export default function App() {
-  // Global Shared States
-  const [products, setProducts] = useState<ProductMaster[]>(initialProducts);
-  const [inventoryList, setInventoryList] = useState<InventoryData[]>(initialInventory);
-  const [salesList, setSalesList] = useState<SalesData[]>(initialSales);
-
-  // Demand forecasting adjust overrides state with localStorage persistence
-  const [salesOverrides, setSalesOverrides] = useState<Record<string, number>>(() => {
-    const cached = localStorage.getItem('healthon_po_sales_overrides');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    return {};
-  });
-
-  const handleUpdateSalesOverrides = (newOverrides: Record<string, number>) => {
-    setSalesOverrides(newOverrides);
-    localStorage.setItem('healthon_po_sales_overrides', JSON.stringify(newOverrides));
-  };
-
-  // Manufacturers States with localStorage Support
-  const [manufacturers, setManufacturers] = useState<Manufacturer[]>(() => {
-    const cached = localStorage.getItem('healthon_po_manufacturers');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    localStorage.setItem('healthon_po_manufacturers', JSON.stringify(initialManufacturers));
-    return initialManufacturers;
-  });
-
-  const saveManufacturersToCache = (newManufacturers: Manufacturer[]) => {
-    setManufacturers(newManufacturers);
-    localStorage.setItem('healthon_po_manufacturers', JSON.stringify(newManufacturers));
-  };
-
-  const handleAddManufacturer = (newM: Manufacturer) => {
-    saveManufacturersToCache([newM, ...manufacturers]);
-  };
-
-  const handleUpdateManufacturer = (updatedM: Manufacturer) => {
-    saveManufacturersToCache(manufacturers.map(m => m.id === updatedM.id ? updatedM : m));
-  };
-
-  const handleDeleteManufacturer = (idToDelete: string) => {
-    saveManufacturersToCache(manufacturers.filter(m => m.id !== idToDelete));
-  };
-
-  // Load and store orders state with localStorage support and pre-populated default mock records
-  const [orders, setOrders] = useState<PurchaseOrder[]>(() => {
-    const cached = localStorage.getItem('healthon_po_orders');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        // Fallback
-      }
-    }
-    const defaults: PurchaseOrder[] = [
-      {
-        id: "PO-TEA-001",
-        groupName: "【合計】お茶/4月発注",
-        orderDate: "2026-04-10",
-        scheduledDeliveryDate: "2026-04-24",
-        assignedStaff: "佐藤 拓也",
-        status: "入庫完了",
-        items: [
-          { sku: "azuki", productName: "あずき茶", brand: "温活農園", requestedQty: 150, weight: 160 },
-          { sku: "gobou", productName: "国産ごぼう茶", brand: "大福園", requestedQty: 100, weight: 120 },
-          { sku: "chamomile", productName: "カモミールハーブティー", brand: "MEZZO", requestedQty: 80, weight: 45 }
-        ],
-        notes: "お茶類4月統合発注分。天草、大福、MEZZO各社一括出荷にて手配。"
-      },
-      {
-        id: "PO-MAMA-002",
-        groupName: "【ママセレクト】5月発注用",
-        orderDate: "2026-05-15",
-        scheduledDeliveryDate: "2026-05-29",
-        assignedStaff: "鈴木 健一郎",
-        status: "検収中/入庫中",
-        items: [
-          { sku: "tanpopo-set3", productName: "たんぽぽ茶3個セット", brand: "ママセレクト", requestedQty: 60, weight: 180 },
-          { sku: "potato-pw", productName: "じゃがいもパウダー", brand: "ママセレクト", requestedQty: 120, weight: 100 }
-        ],
-        notes: "一部パウダー原材料入荷状況により、ほうれん草/コーンは別途発注予定。"
-      }
-    ];
-    localStorage.setItem('healthon_po_orders', JSON.stringify(defaults));
-    return defaults;
-  });
-
-  const saveOrdersToCache = (newOrders: PurchaseOrder[]) => {
-    setOrders(newOrders);
-    localStorage.setItem('healthon_po_orders', JSON.stringify(newOrders));
-  };
-
-  const handleAddOrder = (newOrder: PurchaseOrder) => {
-    saveOrdersToCache([newOrder, ...orders]);
-  };
-
-  const handleUpdateOrder = (updatedOrder: PurchaseOrder) => {
-    saveOrdersToCache(orders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    
-    // Auto-update inventory stocks of products if the order moves to '入庫完了'
-    if (updatedOrder.status === '入庫完了') {
-      setInventoryList(prev => {
-        return prev.map(inv => {
-          const matchingItem = updatedOrder.items.find(it => it.sku === inv.sku);
-          if (matchingItem) {
-            return {
-              ...inv,
-              logiStock: inv.logiStock + matchingItem.requestedQty,
-              status: '在庫あり'
-            };
-          }
-          return inv;
-        });
-      });
-      addToast(`発注商品がすべて入庫完了したため、クラウドロジ(国内流通倉庫)在庫に加算されました！`, 'success');
-    }
-  };
-
-  const handleDeleteOrder = (idToDelete: string) => {
-    saveOrdersToCache(orders.filter(o => o.id !== idToDelete));
-  };
+  // Global Shared States with Firestore synchronization
+  const [products, setProducts] = useState<ProductMaster[]>([]);
+  const [inventoryList, setInventoryList] = useState<InventoryData[]>([]);
+  const [salesList, setSalesList] = useState<SalesData[]>([]);
+  const [salesOverrides, setSalesOverrides] = useState<Record<string, number>>({});
+  const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
 
   // Keep track of when warehouse files were last uploaded
   const [uploadTimestamps, setUploadTimestamps] = useState<Record<string, string>>({
@@ -164,52 +43,459 @@ export default function App() {
   });
 
   // Shared proposed quantities and delivery dates
-  const [proposedQuantities, setProposedQuantities] = useState<Record<string, number>>(() => {
-    const cached = localStorage.getItem('healthon_po_proposed_quantities');
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) {}
-    }
-    return {};
-  });
+  const [proposedQuantities, setProposedQuantities] = useState<Record<string, number>>({});
+  const [proposedDeliveryDates, setProposedDeliveryDates] = useState<Record<string, string>>({});
+  const [proposedSelectedSkus, setProposedSelectedSkus] = useState<Record<string, boolean>>({});
 
-  const [proposedDeliveryDates, setProposedDeliveryDates] = useState<Record<string, string>>(() => {
-    const cached = localStorage.getItem('healthon_po_proposed_delivery_dates');
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) {}
-    }
-    return {};
-  });
-
-  const [proposedSelectedSkus, setProposedSelectedSkus] = useState<Record<string, boolean>>(() => {
-    const cached = localStorage.getItem('healthon_po_proposed_selected_skus');
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) {}
-    }
-    return {};
-  });
-
-  const handleUpdateProposedQuantities = (newVal: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => {
-    setProposedQuantities(prev => {
-      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
-      localStorage.setItem('healthon_po_proposed_quantities', JSON.stringify(next));
-      return next;
+  // ----------------- FIRESTORE REALTIME SYNC LISTENERS -----------------
+  
+  // 1. Sync Products
+  useEffect(() => {
+    const q = collection(db, 'products');
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Bootstrap database with product defaults
+        for (const p of initialProducts) {
+          try {
+            await setDoc(doc(db, 'products', p.sku), p);
+          } catch (e) {
+            console.error('Products bootstrap failed:', e);
+          }
+        }
+      } else {
+        const list: ProductMaster[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as ProductMaster);
+        });
+        setProducts(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'products');
     });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Sync Inventory
+  useEffect(() => {
+    const q = collection(db, 'inventory');
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Bootstrap database with inventory defaults
+        for (const i of initialInventory) {
+          try {
+            await setDoc(doc(db, 'inventory', i.sku), i);
+          } catch (e) {
+            console.error('Inventory bootstrap failed:', e);
+          }
+        }
+      } else {
+        const list: InventoryData[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as InventoryData);
+        });
+        setInventoryList(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'inventory');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 3. Sync Sales Records
+  useEffect(() => {
+    const q = collection(db, 'sales');
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Bootstrap database with sales defaults
+        let index = 0;
+        for (const s of initialSales) {
+          try {
+            const docId = `${s.sku}_${s.date}_${index++}`;
+            await setDoc(doc(db, 'sales', docId), s);
+          } catch (e) {
+            console.error('Sales bootstrap failed:', e);
+          }
+        }
+      } else {
+        const list: SalesData[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as SalesData);
+        });
+        setSalesList(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'sales');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 4. Sync Sales Overrides
+  useEffect(() => {
+    const docRef = doc(db, 'settings', 'sales_overrides');
+    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setSalesOverrides(data.overrides || {});
+      } else {
+        try {
+          await setDoc(docRef, { overrides: {} });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/sales_overrides');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 5. Sync Manufacturers
+  useEffect(() => {
+    const q = collection(db, 'manufacturers');
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Bootstrap database with manufacturer defaults
+        for (const m of initialManufacturers) {
+          try {
+            await setDoc(doc(db, 'manufacturers', m.id), m);
+          } catch (e) {
+            console.error('Manufacturers bootstrap failed:', e);
+          }
+        }
+      } else {
+        const list: Manufacturer[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Manufacturer);
+        });
+        setManufacturers(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'manufacturers');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 6. Sync Orders Ledger
+  useEffect(() => {
+    const q = collection(db, 'orders');
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty) {
+        // Bootstrap defaults
+        const defaults: PurchaseOrder[] = [
+          {
+            id: "PO-TEA-001",
+            groupName: "【合計】お茶/4月発注",
+            orderDate: "2026-04-10",
+            scheduledDeliveryDate: "2026-04-24",
+            assignedStaff: "佐藤 拓也",
+            status: "入庫完了",
+            items: [
+              { sku: "azuki", productName: "あずき茶", brand: "温活農園", requestedQty: 150, weight: 160 },
+              { sku: "gobou", productName: "国産ごぼう茶", brand: "大福園", requestedQty: 100, weight: 120 },
+              { sku: "chamomile", productName: "カモミールハーブティー", brand: "MEZZO", requestedQty: 80, weight: 45 }
+            ],
+            notes: "お茶類4月統合発注分。天草、大福、MEZZO各社一括出荷にて手配。"
+          },
+          {
+            id: "PO-MAMA-002",
+            groupName: "【ママセレクト】5月発注用",
+            orderDate: "2026-05-15",
+            scheduledDeliveryDate: "2026-05-29",
+            assignedStaff: "鈴木 健一郎",
+            status: "検収中/入庫中",
+            items: [
+              { sku: "tanpopo-set3", productName: "たんぽぽ茶3個セット", brand: "ママセレクト", requestedQty: 60, weight: 180 },
+              { sku: "potato-pw", productName: "じゃがいもパウダー", brand: "ママセレクト", requestedQty: 120, weight: 100 }
+            ],
+            notes: "一部パウダー原材料入荷状況により、ほうれん草/コーンは別途発注予定。"
+          }
+        ];
+        for (const o of defaults) {
+          try {
+            await setDoc(doc(db, 'orders', o.id), o);
+          } catch (e) {
+            console.error('Orders bootstrap failed:', e);
+          }
+        }
+      } else {
+        const list: PurchaseOrder[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as PurchaseOrder);
+        });
+        list.sort((a, b) => b.id.localeCompare(a.id));
+        setOrders(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'orders');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 7. Sync Workspace Proposals
+  useEffect(() => {
+    const docRef = doc(db, 'settings', 'global_proposals');
+    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setProposedQuantities(data.quantities || {});
+        setProposedDeliveryDates(data.deliveryDates || {});
+        setProposedSelectedSkus(data.selectedSkus || {});
+      } else {
+        try {
+          await setDoc(docRef, { quantities: {}, deliveryDates: {}, selectedSkus: {} });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/global_proposals');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 8. Sync CSV Upload Timestamps
+  useEffect(() => {
+    const docRef = doc(db, 'settings', 'upload_timestamps');
+    const unsubscribe = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUploadTimestamps(data.timestamps || {
+          fba: '2026/05/25 13:32',
+          rsl: '2026/05/25 13:32',
+          sc: '2026/05/25 13:32',
+          logi: '2026/05/25 13:32',
+          products: '2026/05/25 13:32',
+          sales: '2026/05/25 13:32',
+        });
+      } else {
+        const initial = {
+          fba: '2026/05/25 13:32',
+          rsl: '2026/05/25 13:32',
+          sc: '2026/05/25 13:32',
+          logi: '2026/05/25 13:32',
+          products: '2026/05/25 13:32',
+          sales: '2026/05/25 13:32',
+        };
+        try {
+          await setDoc(docRef, { timestamps: initial });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/upload_timestamps');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // ----------------- FIRESTORE MUTATIVE WRITES -----------------
+
+  const handleUpdateSalesOverrides = async (newOverrides: Record<string, number>) => {
+    setSalesOverrides(newOverrides);
+    try {
+      await setDoc(doc(db, 'settings', 'sales_overrides'), { overrides: newOverrides });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/sales_overrides');
+    }
   };
 
-  const handleUpdateProposedDeliveryDates = (newVal: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
-    setProposedDeliveryDates(prev => {
-      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
-      localStorage.setItem('healthon_po_proposed_delivery_dates', JSON.stringify(next));
-      return next;
-    });
+  const handleAddManufacturer = async (newM: Manufacturer) => {
+    try {
+      await setDoc(doc(db, 'manufacturers', newM.id), newM);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `manufacturers/${newM.id}`);
+    }
   };
 
-  const handleUpdateProposedSelectedSkus = (newVal: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
-    setProposedSelectedSkus(prev => {
-      const next = typeof newVal === 'function' ? newVal(prev) : newVal;
-      localStorage.setItem('healthon_po_proposed_selected_skus', JSON.stringify(next));
-      return next;
-    });
+  const handleUpdateManufacturer = async (updatedM: Manufacturer) => {
+    try {
+      await setDoc(doc(db, 'manufacturers', updatedM.id), updatedM);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `manufacturers/${updatedM.id}`);
+    }
+  };
+
+  const handleDeleteManufacturer = async (idToDelete: string) => {
+    try {
+      await deleteDoc(doc(db, 'manufacturers', idToDelete));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `manufacturers/${idToDelete}`);
+    }
+  };
+
+  const handleAddOrder = async (newOrder: PurchaseOrder) => {
+    try {
+      await setDoc(doc(db, 'orders', newOrder.id), newOrder);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `orders/${newOrder.id}`);
+    }
+  };
+
+  const handleUpdateOrder = async (updatedOrder: PurchaseOrder) => {
+    try {
+      await setDoc(doc(db, 'orders', updatedOrder.id), updatedOrder);
+      
+      // Auto-update inventory stocks of products if the order moves to '入庫完了'
+      if (updatedOrder.status === '入庫完了') {
+        const nextInventoryPromises = inventoryList.map(async (inv) => {
+          const matchingItem = updatedOrder.items.find(it => it.sku === inv.sku);
+          if (matchingItem) {
+            const updatedInv = {
+              ...inv,
+              logiStock: inv.logiStock + matchingItem.requestedQty,
+              status: '在庫あり'
+            };
+            await setDoc(doc(db, 'inventory', inv.sku), updatedInv);
+          }
+        });
+        await Promise.all(nextInventoryPromises);
+        addToast(`発注商品がすべて入庫完了したため、クラウドロジ(国内流通倉庫)在庫に加算されました！`, 'success');
+      }
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `orders/${updatedOrder.id}`);
+    }
+  };
+
+  const handleDeleteOrder = async (idToDelete: string) => {
+    try {
+      await deleteDoc(doc(db, 'orders', idToDelete));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `orders/${idToDelete}`);
+    }
+  };
+
+  const handleUpdateProposedQuantities = async (newVal: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => {
+    const next = typeof newVal === 'function' ? newVal(proposedQuantities) : newVal;
+    setProposedQuantities(next);
+    try {
+      await setDoc(doc(db, 'settings', 'global_proposals'), {
+        quantities: next,
+        deliveryDates: proposedDeliveryDates,
+        selectedSkus: proposedSelectedSkus
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/global_proposals');
+    }
+  };
+
+  const handleUpdateProposedDeliveryDates = async (newVal: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    const next = typeof newVal === 'function' ? newVal(proposedDeliveryDates) : newVal;
+    setProposedDeliveryDates(next);
+    try {
+      await setDoc(doc(db, 'settings', 'global_proposals'), {
+        quantities: proposedQuantities,
+        deliveryDates: next,
+        selectedSkus: proposedSelectedSkus
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/global_proposals');
+    }
+  };
+
+  const handleUpdateProposedSelectedSkus = async (newVal: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => {
+    const next = typeof newVal === 'function' ? newVal(proposedSelectedSkus) : newVal;
+    setProposedSelectedSkus(next);
+    try {
+      await setDoc(doc(db, 'settings', 'global_proposals'), {
+        quantities: proposedQuantities,
+        deliveryDates: proposedDeliveryDates,
+        selectedSkus: next
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/global_proposals');
+    }
+  };
+
+  const handleAddProduct = async (newProduct: ProductMaster) => {
+    try {
+      await setDoc(doc(db, 'products', newProduct.sku), newProduct);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `products/${newProduct.sku}`);
+    }
+  };
+
+  const handleUpdateProduct = async (updatedProduct: ProductMaster) => {
+    try {
+      await setDoc(doc(db, 'products', updatedProduct.sku), updatedProduct);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `products/${updatedProduct.sku}`);
+    }
+  };
+
+  const handleDeleteProduct = async (skuToDelete: string) => {
+    try {
+      await deleteDoc(doc(db, 'products', skuToDelete));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `products/${skuToDelete}`);
+    }
+  };
+
+  // --- CSV MULTI-UPLOAD UPSERT ORCHESTRATORS ON SNAPSHOTS ---
+  const handleImportProducts = async (newProducts: ProductMaster[]) => {
+    try {
+      for (const p of newProducts) {
+        await setDoc(doc(db, 'products', p.sku), p);
+      }
+      const nowStr = getFormattedNow();
+      await setDoc(doc(db, 'settings', 'upload_timestamps'), {
+        timestamps: {
+          ...uploadTimestamps,
+          products: nowStr
+        }
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/upload_timestamps');
+    }
+  };
+
+  const handleImportInventory = async (newInventory: InventoryData[], subtype?: 'fba' | 'rsl' | 'sc' | 'logi' | 'all') => {
+    try {
+      for (const i of newInventory) {
+        await setDoc(doc(db, 'inventory', i.sku), i);
+      }
+      if (subtype) {
+        const nowStr = getFormattedNow();
+        let nextTimestamps = { ...uploadTimestamps };
+        if (subtype === 'all') {
+          nextTimestamps = {
+            ...nextTimestamps,
+            fba: nowStr,
+            rsl: nowStr,
+            sc: nowStr,
+            logi: nowStr,
+          };
+        } else {
+          nextTimestamps = {
+            ...nextTimestamps,
+            [subtype]: nowStr,
+          };
+        }
+        await setDoc(doc(db, 'settings', 'upload_timestamps'), {
+          timestamps: nextTimestamps
+        });
+      }
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/upload_timestamps');
+    }
+  };
+
+  const handleImportSales = async (newSales: SalesData[]) => {
+    try {
+      let index = Math.floor(Math.random() * 100000);
+      for (const s of newSales) {
+        const docId = `${s.sku}_${s.date}_${index++}`;
+        await setDoc(doc(db, 'sales', docId), s);
+      }
+      const nowStr = getFormattedNow();
+      await setDoc(doc(db, 'settings', 'upload_timestamps'), {
+        timestamps: {
+          ...uploadTimestamps,
+          sales: nowStr
+        }
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, 'settings/upload_timestamps');
+    }
   };
 
   // Active navigation tab
@@ -244,7 +530,7 @@ export default function App() {
     // Auto purge toast after 4.5 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
+    }, 4505);
   };
 
   const removeToast = (id: string) => {
@@ -255,75 +541,6 @@ export default function App() {
   const getFormattedNow = () => {
     const now = new Date();
     return `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  };
-
-  // --- CRUD PRODUCT MASTER HANDLERS ---
-  const handleAddProduct = (newProduct: ProductMaster) => {
-    setProducts((prev) => [...prev, newProduct]);
-  };
-
-  const handleUpdateProduct = (updatedProduct: ProductMaster) => {
-    setProducts((prev) => prev.map((p) => (p.sku === updatedProduct.sku ? updatedProduct : p)));
-  };
-
-  const handleDeleteProduct = (skuToDelete: string) => {
-    // Cascading deletion is also supported locally
-    setProducts((prev) => prev.filter((p) => p.sku !== skuToDelete));
-  };
-
-  // --- CSV MULTI-UPLOAD UPSERT ORCHESTRATORS ---
-  const handleImportProducts = (newProducts: ProductMaster[]) => {
-    setProducts((prev) => {
-      const map = new Map(prev.map((p) => [p.sku.toLowerCase(), p]));
-      newProducts.forEach((p) => {
-        map.set(p.sku.toLowerCase(), p);
-      });
-      return Array.from(map.values());
-    });
-    setUploadTimestamps((prev) => ({
-      ...prev,
-      products: getFormattedNow(),
-    }));
-  };
-
-  const handleImportInventory = (newInventory: InventoryData[], subtype?: 'fba' | 'rsl' | 'sc' | 'logi' | 'all') => {
-    setInventoryList((prev) => {
-      const map = new Map(prev.map((i) => [i.sku.toLowerCase(), i]));
-      newInventory.forEach((i) => {
-        map.set(i.sku.toLowerCase(), i);
-      });
-      return Array.from(map.values());
-    });
-
-    if (subtype) {
-      setUploadTimestamps((prev) => {
-        const nowStr = getFormattedNow();
-        if (subtype === 'all') {
-          return {
-            ...prev,
-            fba: nowStr,
-            rsl: nowStr,
-            sc: nowStr,
-            logi: nowStr,
-          };
-        }
-        return {
-          ...prev,
-          [subtype]: nowStr,
-        };
-      });
-    }
-  };
-
-  const handleImportSales = (newSales: SalesData[]) => {
-    setSalesList((prev) => {
-      // Append sales historical points so that we can accumulate totals
-      return [...prev, ...newSales];
-    });
-    setUploadTimestamps((prev) => ({
-      ...prev,
-      sales: getFormattedNow(),
-    }));
   };
 
   return (

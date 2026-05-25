@@ -679,7 +679,6 @@ export default function OrderManagementTab({
                         const totalStock = inv.fbaStock + inv.rslStock + inv.scStock + inv.logiStock;
                         
                         const qtyVal = proposedQuantities[p.sku] ?? 0;
-                        const dateVal = proposedDeliveryDates[p.sku] || scheduledDate;
                         const isRegistered = qtyVal > 0;
 
                         return (
@@ -718,14 +717,21 @@ export default function OrderManagementTab({
                               />
                             </td>
                             <td className="py-2 px-4 text-center">
-                              <input
-                                type="date"
-                                value={dateVal}
-                                onChange={(e) => {
-                                  onUpdateProposedDeliveryDates(prev => ({ ...prev, [p.sku]: e.target.value }));
-                                }}
-                                className="bg-slate-950 border border-slate-850 text-slate-300 font-mono text-[11px] py-1.5 px-2 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                              />
+                              <div className="relative inline-block w-[125px]">
+                                <input
+                                  type="date"
+                                  value={proposedDeliveryDates[p.sku] || ''}
+                                  onChange={(e) => {
+                                    onUpdateProposedDeliveryDates(prev => ({ ...prev, [p.sku]: e.target.value }));
+                                  }}
+                                  className="bg-slate-950 border border-slate-850 text-slate-300 font-mono text-[11px] py-1.5 px-2 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full text-left"
+                                />
+                                {!proposedDeliveryDates[p.sku] && (
+                                  <div className="absolute inset-y-0 left-2 flex items-center pointer-events-none text-slate-500 font-mono text-[10px]">
+                                    {scheduledDate} (最速)
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="py-2 px-4 text-center">
                               <button

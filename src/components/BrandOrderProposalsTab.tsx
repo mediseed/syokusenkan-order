@@ -646,17 +646,24 @@ export default function BrandOrderProposalsTab({
 
                             {/* Preferred Delivery Date (Manual Input) */}
                             <td className="py-2 px-3 text-center w-[145px]">
-                              <input
-                                type="date"
-                                value={deliveryDateOverrides[calc.product.sku] || ''}
-                                onChange={(e) => {
-                                  setDeliveryDateOverrides(prev => ({
-                                    ...prev,
-                                    [calc.product.sku]: e.target.value
-                                  }));
-                                }}
-                                className="bg-slate-950 border border-slate-800 text-slate-350 font-mono text-[11px] py-1 px-1.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 w-[130px] h-[28px] focus:text-white"
-                              />
+                              <div className="relative inline-block w-[130px]">
+                                <input
+                                  type="date"
+                                  value={deliveryDateOverrides[calc.product.sku] || ''}
+                                  onChange={(e) => {
+                                    setDeliveryDateOverrides(prev => ({
+                                      ...prev,
+                                      [calc.product.sku]: e.target.value
+                                    }));
+                                  }}
+                                  className="bg-slate-950 border border-slate-800 text-slate-350 font-mono text-[11px] py-1 px-1.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full h-[28px] focus:text-white"
+                                />
+                                {!deliveryDateOverrides[calc.product.sku] && (
+                                  <div className="absolute inset-y-0 left-2 flex items-center pointer-events-none text-slate-500 font-mono text-[10px]">
+                                    2026-06-08 (推奨)
+                                  </div>
+                                )}
+                              </div>
                             </td>
 
                             {/* Safety Stock */}
