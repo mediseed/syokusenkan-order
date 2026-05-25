@@ -114,28 +114,32 @@ export const computeRecommendations = (
 
     const averageDailySales = monthlySales / 30;
     const leadTime = typeof product.leadTime === 'number' ? product.leadTime : 14;
-    const safetyStock = typeof product.safetyStock === 'number' ? product.safetyStock : Math.round(averageDailySales * 7);
-    const reorderPoint = Math.round((averageDailySales * leadTime) + safetyStock);
+    
+    // セット商品の場合は安全在庫と発注点を計算しない (0とする)
+    const safetyStock = product.isBundle ? 0 : (typeof product.safetyStock === 'number' ? product.safetyStock : Math.round(averageDailySales * 7));
+    const reorderPoint = product.isBundle ? 0 : Math.round((averageDailySales * leadTime) + safetyStock);
 
     let stockDays = 9999;
-    if (monthlySales > 0) {
+    if (!product.isBundle && monthlySales > 0) {
       stockDays = Math.round((totalStock / monthlySales) * 30);
     }
 
     let recommendedQty = 0;
-    if (totalStock <= reorderPoint && monthlySales > 0) {
+    if (!product.isBundle && totalStock <= reorderPoint && monthlySales > 0) {
       recommendedQty = Math.round(reorderPoint * 1.5);
     }
 
     let priority: '高' | '中' | '低' = '低';
-    if (stockDays < 15) {
-      priority = '高';
-    } else if (stockDays < 30) {
-      priority = '中';
+    if (!product.isBundle) {
+      if (stockDays < 15) {
+        priority = '高';
+      } else if (stockDays < 30) {
+        priority = '中';
+      }
     }
 
-    let estimatedOutDate = '安定 / 実績なし';
-    if (monthlySales > 0) {
+    let estimatedOutDate = product.isBundle ? '対象外' : '安定 / 実績なし';
+    if (!product.isBundle && monthlySales > 0) {
       const date = new Date(currentDateStr);
       date.setDate(date.getDate() + stockDays);
       estimatedOutDate = date.toISOString().split('T')[0];

@@ -54,6 +54,10 @@ export const initialProducts: ProductMaster[] = [
     logiId: 'CL-AZUKI-SET2',
     rawMaterialProducer: '株式会社天草',
     fillingParty: '○○充填',
+    isBundle: true,
+    bundleItems: [
+      { sku: 'azuki', quantity: 2 }
+    ],
     isActive: true
   },
   {

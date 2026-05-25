@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory } from 'lucide-react';
+import { LayoutDashboard, Boxes, RefreshCw, Sparkles, UploadCloud, Bell, HelpCircle, X, Check, AlertTriangle, AlertCircle, ClipboardList, Factory, ShoppingCart } from 'lucide-react';
 
 import { ProductMaster, InventoryData, SalesData, PurchaseOrder, Manufacturer } from './types';
 import { initialProducts, initialInventory, initialSales, initialManufacturers } from './data/mockData';
@@ -13,10 +13,10 @@ import { initialProducts, initialInventory, initialSales, initialManufacturers }
 import Dashboard from './components/Dashboard';
 import ProductMasterTab from './components/ProductMasterTab';
 import InventoryTab from './components/InventoryTab';
-import RecommendationTab from './components/RecommendationTab';
 import OrderManagementTab from './components/OrderManagementTab';
 import CSVImportModal from './components/CSVImportModal';
 import ManufacturerTab from './components/ManufacturerTab';
+import BrandOrderProposalsTab from './components/BrandOrderProposalsTab';
 
 export default function App() {
   // Global Shared States
@@ -146,6 +146,17 @@ export default function App() {
   // Active navigation tab
   const [activeTab, setActiveTab ] = useState<string>('dashboard');
 
+  // Shared state for transferring proposed brand order drafts to the Order Processing tab
+  const [prefilledDraft, setPrefilledDraft] = useState<{
+    target: string;
+    quantities: Record<string, number>;
+  } | null>(null);
+
+  const handleRegisterDraftToOrder = (target: string, quantities: Record<string, number>) => {
+    setPrefilledDraft({ target, quantities });
+    setActiveTab('orders');
+  };
+
   // CSV Import Modal open/close state
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
@@ -242,7 +253,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 flex flex-col antialiased">
+    <div className="min-h-screen bg-slate-900 font-sans text-slate-100 flex flex-col antialiased">
       
       {/* Dynamic Toast Alerts Container Overlay */}
       <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2.5 max-w-sm w-full">
@@ -308,7 +319,7 @@ export default function App() {
             { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
             { id: 'products', label: '商品マスタ管理', icon: Boxes },
             { id: 'inventory', label: '在庫状況一覧', icon: Boxes },
-            { id: 'recommendations', label: '自動発注推奨', icon: Sparkles },
+            { id: 'proposals', label: 'ブランド別発注希望', icon: ShoppingCart },
             { id: 'orders', label: '発注処理', icon: ClipboardList },
             { id: 'manufacturers', label: 'メーカーマスタ管理', icon: Factory },
           ].map((tab) => {
@@ -361,16 +372,21 @@ export default function App() {
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            orders={orders}
+            onAddOrder={handleAddOrder}
+            onUpdateOrder={handleUpdateOrder}
             uploadTimestamps={uploadTimestamps}
             addToast={addToast}
           />
         )}
 
-        {activeTab === 'recommendations' && (
-          <RecommendationTab
+        {activeTab === 'proposals' && (
+          <BrandOrderProposalsTab
             products={products}
             inventoryList={inventoryList}
             salesList={salesList}
+            orders={orders}
+            onRegisterDraft={handleRegisterDraftToOrder}
             addToast={addToast}
           />
         )}
@@ -386,6 +402,8 @@ export default function App() {
             onUpdateOrder={handleUpdateOrder}
             onDeleteOrder={handleDeleteOrder}
             addToast={addToast}
+            prefilledDraft={prefilledDraft}
+            onClearPrefilledDraft={() => setPrefilledDraft(null)}
           />
         )}
 

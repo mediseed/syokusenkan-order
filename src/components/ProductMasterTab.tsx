@@ -1110,7 +1110,7 @@ export default function ProductMasterTab({
                         className="w-4 h-4 rounded text-emerald-600 bg-slate-950 border-slate-800 focus:ring-emerald-500 cursor-pointer"
                       />
                       <label htmlFor="formIsBundleCheckbox" className="text-xs font-bold text-slate-300 cursor-pointer select-none">
-                        この商品はセット商品（他の単品の詰合せ）である
+                        この商品はセット商品である
                       </label>
                     </div>
                   </div>

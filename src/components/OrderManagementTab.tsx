@@ -40,6 +40,11 @@ interface OrderManagementTabProps {
   onUpdateOrder: (order: PurchaseOrder) => void;
   onDeleteOrder: (id: string) => void;
   addToast: (message: string, type: 'success' | 'error' | 'warning') => void;
+  prefilledDraft?: {
+    target: string;
+    quantities: Record<string, number>;
+  } | null;
+  onClearPrefilledDraft?: () => void;
 }
 
 export default function OrderManagementTab({
@@ -51,7 +56,9 @@ export default function OrderManagementTab({
   onAddOrder,
   onUpdateOrder,
   onDeleteOrder,
-  addToast
+  addToast,
+  prefilledDraft,
+  onClearPrefilledDraft
 }: OrderManagementTabProps) {
   // Navigation inside Order Tab: 'planner' (Interactive Wizard) or 'ledger' (Past PO Archives & Stock In)
   const [subTab, setSubTab] = useState<'planner' | 'ledger'>('planner');
@@ -138,10 +145,37 @@ export default function OrderManagementTab({
     addToast('すべての仮発注数量を0にリセットしました。', 'warning');
   };
 
+  const isPrefillingRef = React.useRef(false);
+
   // Run on start
   useEffect(() => {
+    if (isPrefillingRef.current) {
+      isPrefillingRef.current = false;
+      return;
+    }
     applySuggestedToStep1();
   }, [targetedProducts, recommendations, scheduledDate]);
+
+  // Sync prefilledDraft into form setup
+  useEffect(() => {
+    if (prefilledDraft) {
+      isPrefillingRef.current = true;
+      setOrderTarget(prefilledDraft.target);
+      setStep1Quantities(prefilledDraft.quantities);
+      setActiveStep(1);
+      setSubTab('planner');
+      
+      const dates: Record<string, string> = {};
+      Object.keys(prefilledDraft.quantities).forEach(sku => {
+        dates[sku] = scheduledDate;
+      });
+      setStep1DeliveryDates(dates);
+
+      if (onClearPrefilledDraft) {
+        onClearPrefilledDraft();
+      }
+    }
+  }, [prefilledDraft, onClearPrefilledDraft, scheduledDate]);
 
   // -----------------------------------------------------------------
   // STEP 2: AGGREGATE SAME-CLASS TEA MERGING (INTERMEDIATE DERIVED DATA)
